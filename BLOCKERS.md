@@ -55,3 +55,12 @@ GlazeWM sigue corriendo y ya registra `alt+h`, `alt+1`, etc. Dos programas no pu
 - **Historial del portapapeles en texto plano** (D-59): si copias contraseñas desde algo que no las marca como privadas, quedarían en `module-data\clipboard\historial.json`. Propuesta: opción de cifrado o desactivarlo por aplicación de origen.
 - **Notas**: el Markdown es básico (títulos, negrita, cursiva, código, listas, bloques); no hay tablas, enlaces ni imágenes (a propósito, para que renderizar una nota no pueda ejecutar nada).
 - Los módulos se instalan indicando una carpeta escrita; como no vienen preinstalados, la primera vez hay que instalarlos a mano desde `modules\`.
+
+## B-10 Fase 9: lo que falta para el módulo de pareja real
+Detalle y plan en `docs/modulo-pareja.md`. En resumen, necesito de ti:
+- **Aprobación y datos de un proyecto de Supabase** (no creé proyectos, credenciales, secretos ni funciones: reglas de seguridad). Hace falta la URL y la clave `anon`; las claves nunca van en el código, irán en `config.toml`.
+- **`RemoteChannelBackend`** (cliente de Realtime sobre WebSocket): sin escribir ni probar porque no se puede verificar sin servidor; la interfaz (`ChannelBackend`) ya existe y está probada con el backend local. Requerirá una dependencia de WebSocket (p. ej. `tungstenite`), que no está en §14.
+- **Autenticación y política por pareja** (propuesta en el documento).
+- **Diseño del avatar y su comportamiento** (§10.6): el actual es un marcador de posición.
+- **Criterio de §12 Fase 9** («dos instancias se envían mensajes con delay razonable»): cumplido **solo con el canal simulado** dentro de una misma app (prueba unitaria con dos suscriptores: entrega entre 20 y 500 ms, y prueba real del módulo con la pareja virtual: ida y vuelta en ~1,6 s). Con dos equipos reales **no está cumplido**.
+- Sin cola de mensajes sin conexión ni confirmación de entrega: un mensaje a un canal sin suscriptores se pierde (como en una difusión).

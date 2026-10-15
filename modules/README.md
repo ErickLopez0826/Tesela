@@ -49,6 +49,7 @@ En `index.html` carga el SDK que sirve el núcleo (no lo copies) y después tu c
 | `launch` | `apps.launch` (abrir un programa o acceso directo, ruta absoluta de un `.exe` o `.lnk`; nada de comandos) |
 | `clipboard` | `clipboard.read` (no entrega lo que los gestores de contraseñas marcan como privado) y `clipboard.write` |
 | `speedtest` | `speedtest.start` y `speedtest.status` (mide la conexión; consume datos) |
+| `channels` | `channels.info/subscribe/unsubscribe/send`: mensajes por canales con nombre (máx. 2000 caracteres, 20 envíos cada 10 s). Hoy el backend es local y simulado |
 
 Sin permiso, la llamada devuelve el error `permission_denied`.
 
@@ -58,6 +59,8 @@ Sin permiso, la llamada devuelve el error `permission_denied`.
 await wm.call("windows.active_workspace");            // { number: 2 }
 await wm.call("files.write", { path: "a.txt", content: "hola" });
 await wm.on("workspace_changed", (p) => console.log(p.number));
+await wm.onChannel("pareja", (m) => console.log(m.from, m.text));      // permiso "channels"
+await wm.call("channels.send", { channel: "pareja", text: "hola" });
 wm.onAction((id) => { if (id === "saludar") { /* … */ } });
 ```
 

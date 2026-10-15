@@ -6,6 +6,7 @@
  *   wm.call("windows.active_workspace")          -> { number: 1 }
  *   wm.on("workspace_changed", (p) => ...)       -> recibe eventos (requiere haberlos pedido con subscribe)
  *   wm.onAction((id) => ...)                     -> el usuario pulsó una acción que el módulo declaró
+ *   wm.onChannel("pareja", (m) => ...)           -> mensajes de un canal (permiso "channels"); enviar con wm.call("channels.send", ...)
  *   wm.ready                                     -> promesa que se resuelve cuando el núcleo responde
  */
 (function () {
@@ -63,6 +64,13 @@
     },
     onAction: function (handler) {
       actionHandlers.push(handler);
+    },
+    /** Se suscribe a un canal del núcleo (permiso "channels"); el manejador recibe { channel, from, text, sent_at_ms }. */
+    onChannel: function (channel, handler) {
+      var list = handlers.get("channel_message") || [];
+      list.push(function (p) { if (p && p.channel === channel) handler(p); });
+      handlers.set("channel_message", list);
+      return call("channels.subscribe", { channel: channel });
     },
     ready: call("core.version"),
   };

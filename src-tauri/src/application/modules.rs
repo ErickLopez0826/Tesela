@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
 
+use crate::application::channels::{is_valid_channel, ChannelBackend, ChannelMessage, MAX_MESSAGE_CHARS};
 use crate::application::system::SystemServices;
 use crate::domain::modules::Permission;
 use crate::domain::snapshot::StateSnapshot;
@@ -19,6 +20,9 @@ use crate::domain::utility::{is_launchable, MAX_CLIPBOARD_CHARS};
 /// Tras tantos fallos seguidos el núcleo desactiva el módulo.
 pub const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 pub const MAX_NOTICE_CHARS: usize = 300;
+/// Mensajes que un módulo puede enviar por canales en la ventana de tiempo (anti-inundación).
+pub const MAX_CHANNEL_SENDS: usize = 20;
+pub const CHANNEL_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
 pub const MAX_DATA_FILE_BYTES: usize = 1024 * 1024;
 pub const MAX_DATA_FILES: usize = 100;
 
@@ -103,6 +107,7 @@ pub fn required_permission(method: &str) -> Result<Option<Permission>, ApiError>
         "apps.launch" => Some(Permission::Launch),
         "clipboard.read" | "clipboard.write" => Some(Permission::Clipboard),
         "speedtest.start" | "speedtest.status" => Some(Permission::Speedtest),
+        "channels.info" | "channels.subscribe" | "channels.unsubscribe" | "channels.send" => Some(Permission::Channels),
         other => return Err(ApiError::UnknownMethod(format!("no existe el método '{other}'"))),
     })
 }
@@ -114,6 +119,11 @@ pub struct ModuleApi {
     /// (nombre del módulo, texto) -> mostrar un aviso al usuario.
     notify: Arc<dyn Fn(&str, &str) + Send + Sync>,
     core_version: String,
+    channels: Arc<dyn ChannelBackend>,
+    /// Entrega eventos asíncronos a los módulos (mensajes de canales).
+    event_sink: Arc<dyn Fn(ModuleEvent) + Send + Sync>,
+    channel_subs: Mutex<HashMap<String, BTreeSet<String>>>,
+    channel_sends: Mutex<HashMap<String, std::collections::VecDeque<std::time::Instant>>>,
     subscriptions: Mutex<HashMap<String, BTreeSet<String>>>,
     failures: Mutex<HashMap<String, u32>>,
 }
@@ -128,6 +138,8 @@ impl ModuleApi {
         state: Arc<dyn StateSource>,
         services: Arc<SystemServices>,
         notify: Arc<dyn Fn(&str, &str) + Send + Sync>,
+        channels: Arc<dyn ChannelBackend>,
+        event_sink: Arc<dyn Fn(ModuleEvent) + Send + Sync>,
         core_version: &str,
     ) -> ModuleApi {
         ModuleApi {
@@ -136,6 +148,10 @@ impl ModuleApi {
             services,
             notify,
             core_version: core_version.to_string(),
+            channels,
+            event_sink,
+            channel_subs: Mutex::new(HashMap::new()),
+            channel_sends: Mutex::new(HashMap::new()),
             subscriptions: Mutex::new(HashMap::new()),
             failures: Mutex::new(HashMap::new()),
         }
@@ -269,6 +285,68 @@ impl ModuleApi {
                 self.services.speedtest.lock().map_err(|e| ApiError::Failed(e.to_string()))?.start().map_err(ApiError::BadParams)?;
                 Ok(Value::Bool(true))
             }
+            "channels.info" => Ok(json!({ "backend": self.channels.kind(), "latency_ms": self.channels.latency_ms() })),
+            "channels.subscribe" => {
+                let channel = self.channel_param(params)?;
+                let host = self.host.clone();
+                let sink = self.event_sink.clone();
+                let who = module.to_string();
+                self.channels
+                    .subscribe(
+                        module,
+                        &channel,
+                        Arc::new(move |m: ChannelMessage| {
+                            // El permiso se vuelve a comprobar al entregar: si se revocó, el mensaje no llega.
+                            if host.granted(&who).is_some_and(|g| g.contains(&Permission::Channels)) {
+                                sink(ModuleEvent {
+                                    module: who.clone(),
+                                    event: "channel_message".into(),
+                                    payload: json!({
+                                        "channel": m.channel, "from": m.from_module, "text": m.text, "sent_at_ms": m.sent_at_ms
+                                    }),
+                                });
+                            }
+                        }),
+                    )
+                    .map_err(ApiError::Failed)?;
+                self.channel_subs.lock().unwrap().entry(module.to_string()).or_default().insert(channel);
+                Ok(Value::Bool(true))
+            }
+            "channels.unsubscribe" => {
+                let channel = self.channel_param(params)?;
+                self.channels.unsubscribe(module, &channel);
+                if let Some(set) = self.channel_subs.lock().unwrap().get_mut(module) {
+                    set.remove(&channel);
+                }
+                Ok(Value::Bool(true))
+            }
+            "channels.send" => {
+                let channel = self.channel_param(params)?;
+                let text = str_param(params, "text")?;
+                if text.is_empty() || text.chars().count() > MAX_MESSAGE_CHARS {
+                    return Err(ApiError::BadParams(format!("el mensaje debe tener entre 1 y {MAX_MESSAGE_CHARS} caracteres")));
+                }
+                {
+                    let mut log = self.channel_sends.lock().unwrap();
+                    let q = log.entry(module.to_string()).or_default();
+                    let now = std::time::Instant::now();
+                    while q.front().is_some_and(|t| now.duration_since(*t) > CHANNEL_WINDOW) {
+                        q.pop_front();
+                    }
+                    if q.len() >= MAX_CHANNEL_SENDS {
+                        return Err(ApiError::BadParams("demasiados mensajes seguidos; espera unos segundos".into()));
+                    }
+                    q.push_back(now);
+                }
+                let sent_at_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                self.channels
+                    .send(ChannelMessage { channel, from_module: module.to_string(), text: text.to_string(), sent_at_ms })
+                    .map_err(ApiError::Failed)?;
+                Ok(Value::Bool(true))
+            }
             "speedtest.status" => {
                 let s = self.services.speedtest.lock().map_err(|e| ApiError::Failed(e.to_string()))?.status();
                 serde_json::to_value(s).map_err(|e| ApiError::Failed(e.to_string()))
@@ -383,9 +461,24 @@ impl ModuleApi {
         out
     }
 
-    /// Quita todas las suscripciones de un módulo (al desinstalarlo o desactivarlo).
+    /// Quita todas las suscripciones de un módulo, de eventos y de canales (al desinstalarlo o desactivarlo).
     pub fn unsubscribe_all(&self, module: &str) {
         self.subscriptions.lock().unwrap().remove(module);
+        self.channels.unsubscribe_module(module);
+        self.channel_subs.lock().unwrap().remove(module);
+        self.channel_sends.lock().unwrap().remove(module);
+    }
+
+    pub fn channels_of(&self, module: &str) -> BTreeSet<String> {
+        self.channel_subs.lock().unwrap().get(module).cloned().unwrap_or_default()
+    }
+
+    fn channel_param(&self, params: &Value) -> Result<String, ApiError> {
+        let c = str_param(params, "channel")?;
+        if !is_valid_channel(c) {
+            return Err(ApiError::BadParams("nombre de canal no válido (minúsculas, números, - y _; hasta 64)".into()));
+        }
+        Ok(c.to_string())
     }
 
     pub fn subscriptions_of(&self, module: &str) -> BTreeSet<String> {
@@ -547,6 +640,8 @@ pub mod fakes {
         pub clip_calls: Calls,
         pub app_calls: Calls,
         pub notices: Arc<Mutex<Vec<(String, String)>>>,
+        pub events: Arc<Mutex<Vec<ModuleEvent>>>,
+        pub channels: Arc<crate::application::channels::LocalChannelBackend>,
     }
 
     pub fn rig(name: &str, overview: Box<dyn OverviewProvider>) -> Rig {
@@ -613,14 +708,19 @@ pub mod fakes {
         let state = Arc::new(FakeState(Mutex::new(Some(snapshot(1, Some("Editor"))))));
         let notices: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
         let n2 = notices.clone();
+        let events: Arc<Mutex<Vec<ModuleEvent>>> = Arc::default();
+        let e2 = events.clone();
+        let channels = crate::application::channels::LocalChannelBackend::new(std::time::Duration::from_millis(20));
         let api = ModuleApi::new(
             host.clone(),
             state.clone(),
             services,
             Arc::new(move |m, t| n2.lock().unwrap().push((m.to_string(), t.to_string()))),
+            Arc::new(channels.clone()),
+            Arc::new(move |e| e2.lock().unwrap().push(e)),
             "0.1.0",
         );
-        Rig { api, host, state, power_calls, clip_calls, app_calls, notices }
+        Rig { api, host, state, power_calls, clip_calls, app_calls, notices, events, channels }
     }
 }
 
@@ -903,5 +1003,93 @@ mod tests {
         let p = r.api.call("m", "files.dir", json!(null)).unwrap();
         assert!(p["path"].as_str().unwrap().ends_with('m'), "{p}");
         assert!(std::path::Path::new(p["path"].as_str().unwrap()).is_dir());
+    }
+
+    // ---------- Fase 9: canales ----------
+
+    fn wait_events(r: &Rig, n: usize) {
+        for _ in 0..200 {
+            if r.events.lock().unwrap().len() >= n {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("llegaron {} de {n} eventos", r.events.lock().unwrap().len());
+    }
+
+    #[test]
+    fn los_canales_exigen_su_permiso() {
+        let r = rig_ok("chan-denied");
+        r.host.grant("m", &[Permission::Files]);
+        for (method, params) in [
+            ("channels.info", json!(null)),
+            ("channels.subscribe", json!({"channel": "pareja"})),
+            ("channels.unsubscribe", json!({"channel": "pareja"})),
+            ("channels.send", json!({"channel": "pareja", "text": "hola"})),
+        ] {
+            assert_eq!(r.api.call("m", method, params).unwrap_err().code(), "permission_denied", "{method}");
+        }
+        assert_eq!(r.channels.subscriber_count(), 0);
+    }
+
+    #[test]
+    fn dos_modulos_se_envian_mensajes_con_retardo_razonable() {
+        let r = rig_ok("chan-pair");
+        r.host.grant("a", &[Permission::Channels]);
+        r.host.grant("b", &[Permission::Channels]);
+        assert_eq!(r.api.call("a", "channels.info", json!(null)).unwrap(), json!({"backend": "local", "latency_ms": 20}));
+        r.api.call("a", "channels.subscribe", json!({"channel": "pareja"})).unwrap();
+        r.api.call("b", "channels.subscribe", json!({"channel": "pareja"})).unwrap();
+        let t0 = std::time::Instant::now();
+        r.api.call("a", "channels.send", json!({"channel": "pareja", "text": "hola amor"})).unwrap();
+        wait_events(&r, 2);
+        assert!(t0.elapsed() >= std::time::Duration::from_millis(20) && t0.elapsed() < std::time::Duration::from_millis(500));
+        let ev = r.events.lock().unwrap().clone();
+        let to_b = ev.iter().find(|e| e.module == "b").unwrap();
+        assert_eq!(to_b.event, "channel_message");
+        assert_eq!(to_b.payload["text"], "hola amor");
+        assert_eq!(to_b.payload["from"], "a");
+        assert_eq!(to_b.payload["channel"], "pareja");
+        assert!(ev.iter().any(|e| e.module == "a"), "quien envía también lo recibe (filtra por su identidad)");
+    }
+
+    #[test]
+    fn validacion_y_limite_de_mensajes() {
+        let r = rig_ok("chan-limits");
+        r.host.grant("m", &[Permission::Channels]);
+        for bad in ["Mal Canal", "", "a/b", &"x".repeat(65)] {
+            assert_eq!(r.api.call("m", "channels.subscribe", json!({"channel": bad})).unwrap_err().code(), "bad_params", "'{bad}'");
+        }
+        assert_eq!(r.api.call("m", "channels.send", json!({"channel": "c", "text": ""})).unwrap_err().code(), "bad_params");
+        let long = "x".repeat(crate::application::channels::MAX_MESSAGE_CHARS + 1);
+        assert_eq!(r.api.call("m", "channels.send", json!({"channel": "c", "text": long})).unwrap_err().code(), "bad_params");
+        for _ in 0..MAX_CHANNEL_SENDS {
+            r.api.call("m", "channels.send", json!({"channel": "c", "text": "hola"})).unwrap();
+        }
+        let e = r.api.call("m", "channels.send", json!({"channel": "c", "text": "otro"})).unwrap_err();
+        assert_eq!(e.code(), "bad_params");
+        assert!(e.message().contains("demasiados"), "{e}");
+        assert!(r.host.is_enabled("m"), "inundar no desactiva el módulo, solo se frena");
+    }
+
+    #[test]
+    fn revocar_el_permiso_o_desinstalar_corta_la_entrega() {
+        let r = rig_ok("chan-revoke");
+        r.host.grant("a", &[Permission::Channels]);
+        r.host.grant("b", &[Permission::Channels]);
+        r.api.call("a", "channels.subscribe", json!({"channel": "c"})).unwrap();
+        r.api.call("b", "channels.subscribe", json!({"channel": "c"})).unwrap();
+        assert_eq!(r.api.channels_of("a").len(), 1);
+        // a pierde el permiso: ya no recibe aunque siga suscrito.
+        r.host.grant("a", &[Permission::Files]);
+        r.api.call("b", "channels.send", json!({"channel": "c", "text": "x"})).unwrap();
+        wait_events(&r, 1);
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        assert!(r.events.lock().unwrap().iter().all(|e| e.module == "b"));
+        // Desinstalar: no quedan suscripciones.
+        r.api.unsubscribe_all("a");
+        r.api.unsubscribe_all("b");
+        assert_eq!(r.channels.subscriber_count(), 0);
+        assert!(r.api.channels_of("a").is_empty() && r.api.channels_of("b").is_empty());
     }
 }

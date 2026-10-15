@@ -1,0 +1,51 @@
+html, body { height: 100%; margin: 0; }
+body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: #e6e6e6; background: transparent; }
+#compact { display: none; position: relative; height: 100%; align-items: center; justify-content: center; }
+#compact svg { width: 26px; height: 26px; }
+#dot { position: absolute; top: 4px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: #ff6b81; }
+#full { display: flex; flex-direction: column; gap: 6px; height: 100%; box-sizing: border-box; padding: 4px; }
+/* En la barra (32 px de alto) solo cabe el avatar. */
+@media (max-height: 60px) {
+  #compact { display: flex; }
+  #full { display: none; }
+}
+
+#banner { padding: 4px 6px; border-radius: 6px; background: #4a3a10; color: #f0c15a; font-size: 11px; }
+#head { display: flex; align-items: center; gap: 10px; }
+#who { display: flex; flex-direction: column; }
+#mood-text { opacity: 0.6; font-size: 12px; }
+
+/* Avatar (marcador de posición hasta que Erick defina el diseño, §10.6). */
+.face { width: 64px; height: 64px; transform-origin: 50% 90%; }
+.face .head { fill: #ffd27d; }
+.face .cheek { fill: #ff9aa2; opacity: 0; transition: opacity 0.3s; }
+.face .eye { fill: #3b2a1a; transform-origin: center; transform-box: fill-box; animation: blink 4.5s infinite; }
+.face .mouth { fill: none; stroke: #3b2a1a; stroke-width: 4; stroke-linecap: round; transition: d 0.25s; d: path("M34 62 Q50 74 66 62"); }
+.face.mood-happy .cheek, .face.mood-received .cheek { opacity: 0.9; }
+.face.mood-happy { animation: bounce 0.6s 2; }
+.face.mood-happy .mouth { d: path("M30 58 Q50 84 70 58"); }
+.face.mood-received { animation: wiggle 0.5s 3; }
+.face.mood-received .mouth { d: path("M38 66 Q50 58 62 66"); }
+@keyframes blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.1); } }
+@keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+@keyframes wiggle { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-6deg); } 75% { transform: rotate(6deg); } }
+@media (prefers-reduced-motion: reduce) { .face, .face .eye { animation: none !important; } }
+
+#messages { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 4px; padding: 4px; background: #14161a; border-radius: 8px; }
+.msg { max-width: 82%; padding: 4px 8px; border-radius: 10px; word-break: break-word; }
+.msg.me { align-self: flex-end; background: #3d6df2; }
+.msg.partner { align-self: flex-start; background: #2b2f38; }
+.msg small { display: block; opacity: 0.6; font-size: 10px; }
+.empty { opacity: 0.6; padding: 6px; }
+form { display: flex; gap: 4px; }
+input, button { font: inherit; color: inherit; background: #1d2026; border: 1px solid #2b2f38; border-radius: 6px; }
+input { flex: 1; min-width: 0; padding: 4px 6px; }
+button { padding: 4px 8px; cursor: pointer; }
+button:hover { background: #2b2f38; }
+#quick { display: flex; gap: 4px; }
+#quick button { font-size: 16px; padding: 2px 8px; }
+#settings { font-size: 12px; }
+#settings label { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+#settings label.check { opacity: 0.85; }
+#status { font-size: 11px; min-height: 14px; opacity: 0.7; }
+.error { color: #ff8a80; opacity: 1; }

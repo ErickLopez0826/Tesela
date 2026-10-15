@@ -76,3 +76,10 @@ Cómo ejecutar la prueba real: `cargo test --test phase1_windows -- --ignored --
 - ✅ **Prueba de velocidad**: inicia en segundo plano, consulta el estado, guarda resultados. 🟡 **Con datos de ejemplo hasta que instales el CLI de Ookla** (B-9).
 - ✅ Criterio "cada módulo funciona como módulo instalable": `tests/phase8_utilities.rs` con la app REAL instala cada uno con sus permisos, lo ejecuta en su iframe aislado, le dispara sus acciones, comprueba lo que hizo en la API y en disco (p. ej. `Bienvenida.md` y `Nueva nota.md`, historial vacío tras «Limpiar», medición guardada) y lo desinstala sin dejar nada. Otra prueba instala `apps` y `clipboard` **sin conceder permisos** y comprueba que todo se rechaza y que no escriben nada. Una tercera prueba, con ventanas WMTEST y el gestor real, comprueba que una app oculta en otro workspace se lista y que enfocarla cambia de workspace.
 - 113 pruebas de la interfaz (Vitest) cubren la lógica de los cuatro módulos con una API falsa (incluida la seguridad del Markdown).
+
+## Fase 9: Módulo de pareja 🟡 (preparada; falta el backend real)
+- ✅ Módulo instalable `partner`: mensajes, avatar animado, botones rápidos, historial, ajustes, hueco en la barra.
+- ✅ Núcleo: permiso `channels` y API `channels.*` con validación, límites y entrega solo a suscritos con permiso; backend de canales local y simulado (400 ms).
+- ✅ Instalable por separado: la app sin `--manage` es un anfitrión de barra/panel/módulos.
+- ✅ Pruebas: unitarias del hub y de la API (dos módulos intercambian mensajes con retardo medido), 13 de la lógica del módulo (dos instancias con documentos separados, retardo, avatar, persistencia, permisos) y una real con la app (`tests/phase9_partner.rs`: enviar, recibir la respuesta de la pareja virtual por el canal, guardar, desinstalar) más una sin permiso (todo rechazado).
+- ⬜ **No cumplido**: «dos instancias se envían mensajes con delay razonable» **entre equipos reales** (necesita el servidor, ver B-10). Se cumple solo con el canal simulado.

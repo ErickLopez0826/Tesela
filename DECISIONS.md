@@ -98,3 +98,12 @@ Decisiones tomadas durante el desarrollo autónomo. Las marcadas **(por defecto,
 - **D-59 Portapapeles y privacidad.** El núcleo no entrega el contenido si quien copió pidió que no entrara en historiales (`ExcludeClipboardContentFromMonitorProcessing` o `CanIncludeInClipboardHistory = 0`, lo que usan los gestores de contraseñas). El módulo ignora textos de más de 5000 caracteres y guarda 50 entradas. La barra y el panel ejecutan el mismo módulo: releen el archivo antes de escribir para no pisarse. **El historial se guarda en texto plano** en `module-data\clipboard\`.
 - **D-60 Prueba de velocidad.** Con `speedtest.exe` en el PATH se usa el CLI de Ookla (`--format=json`); si no, un adaptador simulado devuelve datos de ejemplo marcados como tales. La medición corre en un hilo; el módulo la inicia y consulta el estado cada segundo (el SDK corta las llamadas a los 15 s).
 - **D-61 Pruebas de extremo a extremo.** `--selftest-module` ahora dispara también las acciones que el módulo declara. En ese modo el portapapeles es un texto fijo para no leer ni guardar nunca el real.
+
+## Fase 9 (módulo de pareja, preparada)
+
+- **D-62 Canales como parte de la API del núcleo.** El módulo no abre conexiones de red: usa `channels.*` (permiso `channels`) y el núcleo decide por qué backend viajan los mensajes. Así el servidor se enchufa después sin tocar el módulo, y el módulo no necesita el permiso `network` ni declarar servidores.
+- **D-63 Backend local simulado por defecto.** `LocalChannelBackend` con 400 ms de retardo; la interfaz avisa con un banner de que los mensajes no salen del equipo. El módulo trae una «pareja virtual» opcional (activada por defecto solo si el backend es local).
+- **D-64 Identidad de instancia.** Cada instancia del módulo genera un id y lo incluye en cada mensaje; ignora los suyos cuando vuelven por el canal. El núcleo entrega a todos los suscritos, incluido quien envía.
+- **D-65 Avatar provisional.** Cara sencilla en SVG con parpadeo en reposo, rebote al enviar y balanceo al recibir. No es un diseño: §10.6 dice que el diseño y el comportamiento no están definidos.
+- **D-66 Límites.** Canal `[a-z0-9_-]{1,64}`, mensaje de 1 a 2000 caracteres, 20 envíos por ventana de 10 s por módulo (se frena sin desactivar el módulo), historial de 100 mensajes.
+- **D-67 Plan del servidor** en `docs/modulo-pareja.md` (Supabase Realtime Broadcast con canales privados y política por pareja). No se creó nada en Supabase ni se escribió el cliente remoto.

@@ -86,6 +86,7 @@ pub fn run() {
     let handle_slot: std::sync::Arc<std::sync::Mutex<Option<tauri::AppHandle>>> = std::sync::Arc::default();
     let module_api = {
         let slot = handle_slot.clone();
+        let slot_for_events = handle_slot.clone();
         std::sync::Arc::new(application::modules::ModuleApi::new(
             modules.clone(),
             last_state.clone(),
@@ -96,6 +97,18 @@ pub fn run() {
                     let _ = h.emit("wm-notice", format!("{module}: {text}"));
                 }
             }),
+            // Backend de canales: local y simulado (retardo de 400 ms que imita la red). El remoto (Supabase)
+            // espera las credenciales de Erick: ver BLOCKERS.md B-10.
+            std::sync::Arc::new(application::channels::LocalChannelBackend::new(std::time::Duration::from_millis(400))),
+            {
+                let slot = slot_for_events;
+                std::sync::Arc::new(move |e: application::modules::ModuleEvent| {
+                    use tauri::Emitter;
+                    if let Some(h) = slot.lock().unwrap().as_ref() {
+                        let _ = h.emit("wm-module-event", serde_json::json!({ "module": e.module, "event": e.event, "payload": e.payload }));
+                    }
+                })
+            },
             domain::modules::CORE_VERSION,
         ))
     };

@@ -1,0 +1,12 @@
+{
+  "id": "partner",
+  "name": "Pareja",
+  "version": "0.1.0",
+  "author": "Erick",
+  "description": "Mensajes en tiempo real con tu pareja y un avatar animado. Por ahora el canal es simulado (no sale de este equipo) hasta conectar el servidor de sincronización.",
+  "min_core_version": "0.1.0",
+  "permissions": ["channels", "files", "notifications"],
+  "entry": "index.html",
+  "ui": { "panel": { "title": "Pareja", "height": 400 }, "bar": { "width": 44 } },
+  "actions": [{ "id": "saludar", "title": "Mandar un saludo" }]
+}

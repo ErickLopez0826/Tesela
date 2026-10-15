@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Pareja</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- Hueco de la barra: solo el avatar pequeño con un punto si hay mensajes nuevos. -->
+    <div id="compact" title="Pareja">
+      <svg class="face mood-idle" id="face-mini" viewBox="0 0 100 100" aria-hidden="true">
+        <circle class="head" cx="50" cy="50" r="40" />
+        <circle class="eye" cx="36" cy="44" r="5" />
+        <circle class="eye" cx="64" cy="44" r="5" />
+        <path class="mouth" d="M34 62 Q50 74 66 62" />
+      </svg>
+      <span id="dot" hidden></span>
+    </div>
+
+    <div id="full">
+      <div id="banner" hidden></div>
+      <div id="head">
+        <svg class="face mood-idle" id="avatar" viewBox="0 0 100 100" role="img" aria-label="Avatar de tu pareja">
+          <circle class="head" cx="50" cy="50" r="40" />
+          <circle class="cheek" cx="28" cy="58" r="6" />
+          <circle class="cheek" cx="72" cy="58" r="6" />
+          <circle class="eye" cx="36" cy="44" r="5" />
+          <circle class="eye" cx="64" cy="44" r="5" />
+          <path class="mouth" d="M34 62 Q50 74 66 62" />
+        </svg>
+        <div id="who"><strong id="partner-name">Mi pareja</strong><span id="mood-text">tranquila</span></div>
+      </div>
+      <div id="messages" role="log" aria-live="polite"></div>
+      <form id="send">
+        <input id="text" placeholder="Escribe un mensaje…" aria-label="Mensaje" maxlength="500" autocomplete="off" />
+        <button type="submit">Enviar</button>
+      </form>
+      <div id="quick"></div>
+      <details id="settings">
+        <summary>Ajustes</summary>
+        <label>Tu nombre <input id="my-name" aria-label="Tu nombre" /></label>
+        <label>Código de pareja <input id="room" aria-label="Código de pareja" /></label>
+        <label class="check"><input id="simulate" type="checkbox" /> Pareja virtual (responde sola, solo en modo simulado)</label>
+        <button id="save-settings" type="button">Guardar</button>
+      </details>
+      <div id="status"></div>
+    </div>
+    <script src="__wm/sdk.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

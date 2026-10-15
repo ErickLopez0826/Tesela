@@ -83,6 +83,7 @@
     launch: "Abrir aplicaciones",
     clipboard: "Portapapeles",
     speedtest: "Prueba de velocidad",
+    channels: "Canales de mensajes",
   };
 </script>
 

@@ -34,10 +34,12 @@ pub enum Permission {
     Clipboard,
     /// Medir la velocidad de tu conexión (consume datos).
     Speedtest,
+    /// Enviar y recibir mensajes por canales (p. ej. con tu pareja).
+    Channels,
 }
 
 impl Permission {
-    pub const ALL: [Permission; 9] = [
+    pub const ALL: [Permission; 10] = [
         Permission::Windows,
         Permission::Power,
         Permission::Network,
@@ -47,6 +49,7 @@ impl Permission {
         Permission::Launch,
         Permission::Clipboard,
         Permission::Speedtest,
+        Permission::Channels,
     ];
 
     /// Texto que se le muestra al usuario antes de instalar (§10.3).
@@ -61,6 +64,7 @@ impl Permission {
             Permission::Launch => "Abrir aplicaciones en tu nombre",
             Permission::Clipboard => "Leer y escribir el texto de tu portapapeles",
             Permission::Speedtest => "Medir la velocidad de tu conexión (usa datos)",
+            Permission::Channels => "Enviar y recibir mensajes por canales (por ejemplo, con tu pareja)",
         }
     }
 }

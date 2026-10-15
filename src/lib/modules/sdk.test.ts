@@ -7,6 +7,7 @@ type Wm = {
   on: (e: string, h: (p: unknown) => void) => Promise<unknown>;
   off: (e: string) => Promise<unknown>;
   onAction: (h: (id: string) => void) => void;
+  onChannel: (c: string, h: (m: { channel: string; text: string }) => void) => Promise<unknown>;
   ready: Promise<unknown>;
 };
 
@@ -76,6 +77,20 @@ describe("SDK de módulos", () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
+  it("onChannel se suscribe y entrega solo los mensajes de ese canal", async () => {
+    const wm = loadSdk();
+    sent.length = 0;
+    const handler = vi.fn();
+    const sub = wm.onChannel("pareja", handler);
+    expect(sent[0]).toMatchObject({ method: "channels.subscribe", params: { channel: "pareja" } });
+    fromParent({ wm: 1, id: sent[0].id, result: true });
+    await sub;
+    fromParent({ wm: 1, event: "channel_message", payload: { channel: "pareja", text: "hola" } });
+    fromParent({ wm: 1, event: "channel_message", payload: { channel: "otro", text: "no" } });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({ channel: "pareja", text: "hola" });
+  });
+
   it("onAction recibe las acciones del usuario", () => {
     const wm = loadSdk();
     const handler = vi.fn();
@@ -106,7 +121,7 @@ describe("SDK de módulos", () => {
 
   it("no depende de Tauri ni expone nada más que `wm`", () => {
     const wm = loadSdk();
-    expect(Object.keys(wm).sort()).toEqual(["call", "off", "on", "onAction", "ready"]);
+    expect(Object.keys(wm).sort()).toEqual(["call", "off", "on", "onAction", "onChannel", "ready"]);
     expect(sdkCode).not.toMatch(/__TAURI|invoke\(|eval\(/);
   });
 });
