@@ -18,6 +18,8 @@ pub struct CliArgs {
     /// Prueba de extremo a extremo de un módulo instalado: la ventana principal lo carga, anota lo que
     /// pide a la API del núcleo y escribe el informe en `WM_SELFTEST_OUT` (solo para pruebas).
     pub selftest_module: Option<String>,
+    /// Espera antes de arrancar (lo usa el reinicio desde la interfaz para dar tiempo a que la instancia anterior suelte los atajos).
+    pub delay_ms: u64,
 }
 
 pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<CliArgs, String> {
@@ -31,6 +33,9 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<CliArgs, St
             }
             "--recover" => out.recover = true,
             "--bar" => out.bar = true,
+            "--delay-ms" => {
+                out.delay_ms = it.next().and_then(|v| v.parse().ok()).ok_or("--delay-ms necesita un número")?;
+            }
             "--selftest-module" => out.selftest_module = Some(it.next().ok_or("--selftest-module necesita el id del módulo")?),
             _ => {}
         }
@@ -46,6 +51,10 @@ pub fn run() {
             std::process::exit(2);
         }
     };
+
+    if args.delay_ms > 0 {
+        std::thread::sleep(std::time::Duration::from_millis(args.delay_ms.min(10_000)));
+    }
 
     #[cfg(windows)]
     if args.recover {
@@ -114,7 +123,10 @@ pub fn run() {
     };
     let protocol_modules = modules.clone();
 
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(feature = "updater")]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    let app = builder
         .manage({
             let mut state = interface::commands::AppState::new(
                 store.clone(),
@@ -124,6 +136,7 @@ pub fn run() {
                 module_api.clone(),
                 last_state.clone(),
             );
+            state.general = interface::commands::GeneralInfo { managing: args.manage.is_some(), bar: args.bar };
             if let Some(id) = &args.selftest_module {
                 state.selftest = Some(interface::commands::SelfTest {
                     module: id.clone(),
@@ -167,6 +180,11 @@ pub fn run() {
             interface::commands::modules_set_enabled,
             interface::commands::module_api,
             interface::commands::selftest_config,
+            interface::commands::general_status,
+            interface::commands::autostart_set,
+            interface::commands::restart_app,
+            interface::updates::updates_check,
+            interface::updates::updates_install,
             interface::commands::selftest_report,
         ])
         .setup(move |app| {
@@ -320,6 +338,13 @@ mod tests {
     fn recover_y_bar_se_reconocen() {
         let r = parse_args(a(&["--recover", "--bar"])).unwrap();
         assert!(r.recover && r.bar);
+    }
+
+    #[test]
+    fn retraso_de_arranque() {
+        assert_eq!(parse_args(a(&["--delay-ms", "1500"])).unwrap().delay_ms, 1500);
+        assert!(parse_args(a(&["--delay-ms", "mucho"])).is_err());
+        assert_eq!(parse_args(a(&[])).unwrap().delay_ms, 0);
     }
 
     #[test]

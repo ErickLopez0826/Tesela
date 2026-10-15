@@ -107,3 +107,12 @@ Decisiones tomadas durante el desarrollo autónomo. Las marcadas **(por defecto,
 - **D-65 Avatar provisional.** Cara sencilla en SVG con parpadeo en reposo, rebote al enviar y balanceo al recibir. No es un diseño: §10.6 dice que el diseño y el comportamiento no están definidos.
 - **D-66 Límites.** Canal `[a-z0-9_-]{1,64}`, mensaje de 1 a 2000 caracteres, 20 envíos por ventana de 10 s por módulo (se frena sin desactivar el módulo), historial de 100 mensajes.
 - **D-67 Plan del servidor** en `docs/modulo-pareja.md` (Supabase Realtime Broadcast con canales privados y política por pareja). No se creó nada en Supabase ni se escribió el cliente remoto.
+
+## Fase 10 (instalación, preparada)
+
+- **D-68 Arranque con Windows por el registro (`HKCU\...\Run`).** No necesita administrador, se deshace borrando un valor y no depende de COM ni del Programador de tareas. Línea: `"<exe>" --manage all --bar`. **No está activado**: lo activa el usuario en la pestaña General. Las pruebas usan una clave propia (`HKCU\Software\WindowManagerTests\...`) y nunca escriben en la clave real.
+- **D-69 Reiniciar desde la interfaz.** «Activar gestor y barra» y «Reiniciar sin gestor» arrancan una instancia nueva con `--delay-ms 1500` (espera a que la anterior suelte los atajos y devuelva las ventanas) y cierran la actual. Activar el gestor pide confirmación porque reorganiza todas las ventanas.
+- **D-70 Instalador NSIS por usuario.** Un solo archivo `.exe`, sin administrador (`installMode: currentUser`), en español, con la carpeta `modules\` como recurso. WebView2 se descarga si falta (`downloadBootstrapper`).
+- **D-71 Compilación de producción.** Opción `custom-protocol` incrusta la interfaz (`dist`). El instalador y las pruebas de producción la usan; el desarrollo sigue usando el servidor de Vite.
+- **D-72 Actualizaciones tras una opción de compilación.** `--features updater` activa el plugin oficial de Tauri; sin ella los comandos explican que no están disponibles. Necesita clave de firma y servidor de versiones: nada de eso existe ni se creó (BLOCKERS B-11).
+- **D-73 Nada se publica ni se firma.** Ni instalador, ni claves, ni releases, ni repositorio remoto.

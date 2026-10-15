@@ -24,7 +24,8 @@ pub struct DevServer(Option<Child>);
 
 impl DevServer {
     pub fn ensure() -> DevServer {
-        if port_open() {
+        // Con un ejecutable de producción (`WM_TEST_EXE`) la interfaz va incrustada: no hace falta servidor.
+        if std::env::var_os("WM_TEST_EXE").is_some() || port_open() {
             return DevServer(None);
         }
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
@@ -67,7 +68,8 @@ pub fn store(base: &Path) -> ModuleStore {
 /// Arranca la app probando un módulo y devuelve el informe que escribió su ventana principal.
 pub fn selftest(base: &Path, module: &str) -> Value {
     let out = base.join(format!("informe-{module}-{}.json", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()));
-    let mut child = Command::new(env!("CARGO_BIN_EXE_window-manager"))
+    let exe = std::env::var_os("WM_TEST_EXE").unwrap_or_else(|| env!("CARGO_BIN_EXE_window-manager").into());
+    let mut child = Command::new(exe)
         .args(["--selftest-module", module])
         .env("WM_CONFIG_DIR", base)
         .env("WM_STATE_DIR", base.join("state"))

@@ -7,6 +7,13 @@ edition = "2021"
 name = "window_manager_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+default = []
+# El instalador y las compilaciones de producción incrustan la interfaz (`dist`) en vez de pedirla al servidor de desarrollo.
+custom-protocol = ["tauri/custom-protocol"]
+# Actualizaciones automáticas: necesita clave de firma y un servidor (ver docs/instalacion-y-actualizaciones.md).
+updater = ["dep:tauri-plugin-updater"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -16,6 +23,7 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.9"
 serde_json = "1"
 sysinfo = "0.38.4"
+tauri-plugin-updater = { version = "2", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
@@ -28,6 +36,7 @@ windows = { version = "0.62", features = [
   "Win32_System_DataExchange",
   "Win32_System_Memory",
   "Win32_System_Ole",
+  "Win32_System_Registry",
   "Win32_System_Power",
   "Win32_System_WinRT",
   "Win32_Media_Audio",

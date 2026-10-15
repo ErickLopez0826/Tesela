@@ -4,3 +4,4 @@
 pub mod bar;
 pub mod commands;
 pub mod modules_protocol;
+pub mod updates;

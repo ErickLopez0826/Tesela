@@ -18,6 +18,13 @@ use crate::domain::rules::{ExclusionList, ExclusionRule};
 use crate::domain::window::WindowInfo;
 use crate::infrastructure::exclusion_store::ExclusionStore;
 
+/// Cómo está arrancada la app.
+#[derive(Default, Clone, Copy)]
+pub struct GeneralInfo {
+    pub managing: bool,
+    pub bar: bool,
+}
+
 /// Configuración de la prueba de extremo a extremo de un módulo.
 pub struct SelfTest {
     pub module: String,
@@ -50,6 +57,8 @@ pub struct AppState {
     pub module_api: Arc<ModuleApi>,
     /// Solo con `--selftest-module`.
     pub selftest: Option<SelfTest>,
+    /// Con qué opciones arrancó esta instancia (para la pestaña General).
+    pub general: GeneralInfo,
     pub stats: Mutex<Box<dyn SystemStatsProvider + Send>>,
     /// Módulos de sistema y de acción (medios, energía, conectividad, fondos, volumen, estadísticas).
     pub services: Arc<SystemServices>,
@@ -76,6 +85,7 @@ impl AppState {
             modules,
             module_api,
             selftest: None,
+            general: GeneralInfo::default(),
             services,
             allow_changes,
             wallpapers_dir: crate::infrastructure::config_file::config_dir().join("wallpapers"),
@@ -367,6 +377,92 @@ pub fn selftest_config(state: State<'_, AppState>) -> Option<String> {
 pub fn selftest_report(app: tauri::AppHandle, state: State<'_, AppState>, report: String) -> Result<(), String> {
     let t = state.selftest.as_ref().ok_or("no hay prueba en curso")?;
     std::fs::write(&t.out, report).map_err(|e| e.to_string())?;
+    app.exit(0);
+    Ok(())
+}
+
+// ----- General: arranque con Windows, reinicio e información (Fase 10) -----
+
+#[derive(Serialize)]
+pub struct GeneralStatus {
+    pub version: String,
+    pub managing: bool,
+    pub bar: bool,
+    /// `true` si la app arranca sola al iniciar sesión en Windows.
+    pub autostart_enabled: bool,
+    pub autostart_command: Option<String>,
+    pub config_dir: String,
+    /// Carpeta con los módulos que trae el instalador, si existe.
+    pub bundled_modules_dir: Option<String>,
+    /// ¿Esta compilación incluye las actualizaciones automáticas?
+    pub updater_compiled: bool,
+}
+
+fn general(app: &tauri::AppHandle, state: &AppState) -> GeneralStatus {
+    use tauri::Manager;
+    #[cfg(windows)]
+    let autostart = crate::infrastructure::windows::autostart::status(
+        crate::infrastructure::windows::autostart::RUN_KEY,
+        crate::infrastructure::windows::autostart::VALUE_NAME,
+    );
+    #[cfg(not(windows))]
+    let autostart: Option<String> = None;
+    let bundled = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|d| d.join("modules"))
+        .filter(|d| d.is_dir())
+        .map(|d| d.display().to_string());
+    GeneralStatus {
+        version: crate::domain::modules::CORE_VERSION.to_string(),
+        managing: state.general.managing,
+        bar: state.general.bar,
+        autostart_enabled: autostart.is_some(),
+        autostart_command: autostart,
+        config_dir: crate::infrastructure::config_file::config_dir().display().to_string(),
+        bundled_modules_dir: bundled,
+        updater_compiled: cfg!(feature = "updater"),
+    }
+}
+
+#[tauri::command]
+pub fn general_status(app: tauri::AppHandle, state: State<'_, AppState>) -> GeneralStatus {
+    general(&app, &state)
+}
+
+/// Activa o desactiva el arranque con Windows. Al activarlo la app arrancará gestionando todas las ventanas y con barra.
+#[tauri::command]
+pub fn autostart_set(app: tauri::AppHandle, state: State<'_, AppState>, enabled: bool) -> Result<GeneralStatus, String> {
+    #[cfg(windows)]
+    {
+        use crate::infrastructure::windows::autostart::{command_line, disable, enable, RUN_KEY, VALUE_NAME};
+        if enabled {
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            enable(RUN_KEY, VALUE_NAME, &command_line(&exe, true, true))?;
+        } else {
+            disable(RUN_KEY, VALUE_NAME)?;
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = enabled;
+    Ok(general(&app, &state))
+}
+
+/// Reinicia la app con o sin gestor de ventanas y barra. La instancia nueva espera un momento para que esta
+/// suelte los atajos y devuelva las ventanas a su sitio.
+#[tauri::command]
+pub fn restart_app(app: tauri::AppHandle, manage: bool, bar: bool) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(["--delay-ms", "1500"]);
+    if manage {
+        cmd.args(["--manage", "all"]);
+    }
+    if bar {
+        cmd.arg("--bar");
+    }
+    cmd.spawn().map_err(|e| format!("no se pudo reiniciar: {e}"))?;
     app.exit(0);
     Ok(())
 }

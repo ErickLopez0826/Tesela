@@ -64,3 +64,14 @@ Detalle y plan en `docs/modulo-pareja.md`. En resumen, necesito de ti:
 - **Diseño del avatar y su comportamiento** (§10.6): el actual es un marcador de posición.
 - **Criterio de §12 Fase 9** («dos instancias se envían mensajes con delay razonable»): cumplido **solo con el canal simulado** dentro de una misma app (prueba unitaria con dos suscriptores: entrega entre 20 y 500 ms, y prueba real del módulo con la pareja virtual: ida y vuelta en ~1,6 s). Con dos equipos reales **no está cumplido**.
 - Sin cola de mensajes sin conexión ni confirmación de entrega: un mensaje a un canal sin suscriptores se pierde (como en una difusión).
+
+## B-11 Fase 10: lo que falta para «se instala con un solo archivo» y «se actualiza»
+Guía paso a paso en `docs/instalacion-y-actualizaciones.md`.
+- **El instalador no está generado.** `npm run tauri build` descarga NSIS a la caché de Tauri la primera vez y no lo ejecuté para no instalar herramientas en tu equipo sin pedírtelo. Lo que sí hice: configurar el instalador (la compilación valida la configuración), compilar el programa de producción y probarlo. **Ejecuta tú `npm run tauri build`** cuando quieras el `.exe`.
+- **Firma de código**: sin certificado, SmartScreen avisará de «editor desconocido». No firmé nada.
+- **Actualizaciones**: faltan (1) la clave de firma del actualizador (`tauri signer generate`; secreta), (2) un lugar donde publicar `latest.json` y el instalador (p. ej. GitHub Releases) y (3) compilar con `--features updater`. Hasta entonces la pestaña General lo dice. Criterio «se actualiza» de §12: **no cumplido**.
+- **Arranque con Windows** verificado contra una clave de pruebas del registro, **no** contra el arranque real ni reiniciando sesión. Además activarlo mientras GlazeWM también arranca solo provoca peleas por las ventanas y los atajos.
+- **Icono definitivo**: el icono es un cuadrado azul provisional de la Fase 0. Necesito tu diseño.
+- **Primer arranque**: la app instalada se abre sin gestor ni barra (modo seguro); hay que activarlos en la pestaña General o con el arranque automático. No hay asistente de primer uso.
+- **Versión**: sigue siendo `0.1.0`; falta decidir tu política de versiones antes de la primera publicación.
+- **Pruebas en otro equipo**: todo lo probado se probó en este equipo (Windows 11, dos monitores). No hay pruebas con otro DPI, otros monitores ni sin WebView2 preinstalado.

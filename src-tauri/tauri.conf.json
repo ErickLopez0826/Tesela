@@ -15,7 +15,19 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
-    "icon": ["icons/icon.ico"]
+    "targets": ["nsis"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
+    "publisher": "Erick",
+    "shortDescription": "Gestor de ventanas por columnas, barra y módulos para Windows",
+    "category": "Utility",
+    "resources": { "../modules/": "modules/" },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false,
+        "languages": ["Spanish"]
+      },
+      "webviewInstallMode": { "type": "downloadBootstrapper" }
+    }
   }
 }

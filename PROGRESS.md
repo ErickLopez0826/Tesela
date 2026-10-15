@@ -4,6 +4,33 @@ Estado por fase de la sección 12. Leyenda: ✅ cumplido · 🟡 parcial · ⬜ 
 
 Verificación previa (estado inicial): PROGRESS.md no existía; solo estaba hecha la Fase 0. Las fases 1 y 2 no estaban implementadas y se hicieron desde cero.
 
+## Resumen por fase (criterio de «Terminado cuando» de la sección 12)
+
+| Fase | Criterio | Estado |
+|---|---|---|
+| 0 Base | La app lista las ventanas visibles con su ejecutable y su título | ✅ cumplido |
+| 1 Núcleo de ventanas | Abrir, cerrar y cambiar entre ventanas sin que se pierdan ni queden fuera de pantalla | ✅ cumplido, **con una desviación**: ocultar por workspace usa `SW_HIDE` porque el cloak de DWM da «acceso denegado» (B-2) |
+| 2 Motor de layout | Todas las reglas de la sección 5 pasan sus pruebas | ✅ cumplido |
+| 3 Atajos y configuración | Cada atajo de la sección 8 ejecuta su acción | ✅ cumplido; los `alt+…` reales no se pudieron registrar mientras GlazeWM corre (B-3): se probó la misma lógica con otro modificador |
+| 4 Exclusiones y pantalla completa | Un juego y una app excluida funcionan como si GlazeWM no existiera | ✅ cumplido con ventanas de prueba (no un juego real); alcances de §6.5 distintos de «siempre» pendientes (el plan los deja para después) |
+| 5 Barra y panel | La barra reserva su espacio y no se encima con las ventanas | ✅ cumplido; contenido de la barra fijo, no configurable por zonas (B-6) |
+| 6 Módulos de sistema y acción | Cada acción del panel funciona desde la interfaz | 🟡 **parcial**: todo lo no disruptivo verificado con el sistema real; energía, Wi-Fi, Bluetooth y compartir red **solo simulados** por tus reglas de seguridad (B-7) |
+| 7 Módulos instalables | El módulo de prueba se instala, pide permisos, funciona y se desinstala limpiamente | ✅ cumplido (prueba real con la app, también con la compilación de producción) |
+| 8 Módulos de utilidad | Cada módulo funciona como módulo instalable | ✅ cumplido; la prueba de velocidad usa datos de ejemplo hasta que instales el CLI de Ookla (B-9) |
+| 9 Módulo de pareja | Dos instancias se envían mensajes con delay razonable | 🟡 **preparada, criterio NO cumplido entre equipos reales**: sin backend (necesita tu proyecto de Supabase, B-10); cumplido solo con el canal simulado |
+| 10 Instalación | La app arranca sola, se instala con un solo archivo y se actualiza | 🟡 **preparada, criterio NO cumplido**: el arranque con Windows existe y está probado (clave de pruebas); el instalador está configurado pero **no generado**; las actualizaciones **no están conectadas** (B-11) |
+
+### Cómo ejecutar todas las pruebas
+```
+cd src-tauri
+cargo test                                   # unitarias (dominio, aplicación, infraestructura): sin ventanas reales
+cd .. && npx vitest run                      # interfaz y módulos
+cd src-tauri
+cargo test --test phase1_windows --test phase3_hotkeys --test phase4_exclusions --test phase5_bar --test phase6_services -- --ignored --nocapture --test-threads=1
+cargo test --test phase7_modules --test phase8_utilities --test phase9_partner -- --ignored --nocapture --test-threads=1   # necesitan npm (o WM_TEST_EXE con la compilación de producción)
+```
+Las pruebas «reales» (`--ignored`) usan solo ventanas de prueba `WMTEST` (nunca tus ventanas), no cambian tu sistema y dejan GlazeWM intacto.
+
 ## Fase 0: Base ✅
 - ✅ Proyecto Tauri con capas (domain / application / infrastructure / interface).
 - ✅ Lista ventanas visibles con ejecutable y título.
@@ -83,3 +110,12 @@ Cómo ejecutar la prueba real: `cargo test --test phase1_windows -- --ignored --
 - ✅ Instalable por separado: la app sin `--manage` es un anfitrión de barra/panel/módulos.
 - ✅ Pruebas: unitarias del hub y de la API (dos módulos intercambian mensajes con retardo medido), 13 de la lógica del módulo (dos instancias con documentos separados, retardo, avatar, persistencia, permisos) y una real con la app (`tests/phase9_partner.rs`: enviar, recibir la respuesta de la pareja virtual por el canal, guardar, desinstalar) más una sin permiso (todo rechazado).
 - ⬜ **No cumplido**: «dos instancias se envían mensajes con delay razonable» **entre equipos reales** (necesita el servidor, ver B-10). Se cumple solo con el canal simulado.
+
+## Fase 10: Instalación 🟡 (preparada; instalador y actualizaciones pendientes)
+- ✅ **Arranque con Windows**: `infrastructure::windows::autostart` (valor en `HKCU\...\Run`), pestaña **General** con casilla; probado activando, consultando, reemplazando y desactivando en una clave de **pruebas** propia (la real no se tocó y sigue sin valor). **No está activado en tu equipo.**
+- ✅ **Pestaña General**: estado (gestor y barra), activar gestor y barra (con confirmación y recordatorio de la tecla de emergencia), reiniciar sin gestor, arranque con Windows, carpetas, módulos incluidos y actualizaciones.
+- ✅ **Compilación de producción** (`--features custom-protocol`, interfaz incrustada): compilada y **probada de extremo a extremo con los 7 casos reales de módulos** (fases 7, 8 y 9) sin servidor de desarrollo, incluida la comprobación de que el módulo aislado no puede hablar con Tauri.
+- ✅ **Configuración del instalador** NSIS por usuario, en español, con los módulos como recurso (la compilación la valida).
+- ⬜ **Instalador no generado** (`npm run tauri build` descarga NSIS: no lo ejecuté sin pedírtelo).
+- ⬜ **Actualizaciones no conectadas**: código listo tras `--features updater` (compila), falta clave de firma y servidor de versiones.
+- Guía completa en `docs/instalacion-y-actualizaciones.md`.

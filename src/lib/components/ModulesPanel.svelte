@@ -8,6 +8,7 @@
     onUninstall,
     onSetGranted,
     onSetEnabled,
+    bundledDir = null,
   }: {
     modules: InstalledModule[];
     onPreview: (path: string) => Promise<InstallPreview>;
@@ -15,6 +16,8 @@
     onUninstall: (id: string) => Promise<void>;
     onSetGranted: (id: string, granted: Permission[]) => Promise<void>;
     onSetEnabled: (id: string, enabled: boolean) => Promise<void>;
+    /** Carpeta con los módulos que trae el instalador (se muestra como ayuda). */
+    bundledDir?: string | null;
   } = $props();
 
   let path = $state("");
@@ -90,6 +93,9 @@
 <section>
   <h2>Instalar un módulo</h2>
   <p class="hint">Indica la carpeta del módulo (la que contiene <code>module.json</code>). Antes de instalar verás los permisos que pide.</p>
+  {#if bundledDir}
+    <p class="hint">Los módulos que trae la app están en <code>{bundledDir}</code> (notes, apps, clipboard, speedtest, partner…).</p>
+  {/if}
   <form onsubmit={(e) => { e.preventDefault(); void review(); }}>
     <input placeholder="C:\ruta\al\modulo" bind:value={path} aria-label="Carpeta del módulo" />
     <button type="submit" disabled={!path.trim()}>Revisar</button>
