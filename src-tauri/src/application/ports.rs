@@ -23,6 +23,8 @@ pub trait WindowPlatform {
     fn forget(&mut self, id: WindowId);
     /// Devuelve cada ventana tocada a su posición original y la muestra.
     fn restore_all(&mut self);
+    /// ¿Está la ventana en pantalla completa? y en qué monitor. `None` si ya no existe.
+    fn fullscreen_state(&self, id: WindowId) -> Option<(bool, Option<u32>)>;
     /// Reemplaza los atajos globales registrados. Devuelve las combinaciones que no se pudieron registrar.
     fn set_hotkeys(&mut self, bindings: &[(Chord, Action)]) -> Vec<String>;
     /// Abre una terminal (alt+enter).

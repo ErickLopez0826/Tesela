@@ -7,5 +7,6 @@ pub mod effects;
 pub mod geometry;
 pub mod layout;
 pub mod manageable;
+pub mod rules;
 pub mod shortcuts;
 pub mod window;

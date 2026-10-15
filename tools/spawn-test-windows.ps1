@@ -9,7 +9,9 @@
 # Imprime "HANDLES h1 h2 ..." y termina cuando se cierran todas las ventanas.
 param(
     [int]$Count = 3,
-    [string]$Prefix = "WMTEST"
+    [string]$Prefix = "WMTEST",
+    # Sin barra de título (como un juego o F11); las pruebas la agrandan para simular pantalla completa.
+    [switch]$Borderless
 )
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName WindowsBase
@@ -24,6 +26,10 @@ for ($i = 1; $i -le $Count; $i++) {
     $w.Top = 80 + 30 * $i
     $w.Width = 420
     $w.Height = 300
+    if ($Borderless) {
+        $w.WindowStyle = 'None'
+        $w.ResizeMode = 'NoResize'
+    }
     $w.Show()
     $handles += (New-Object System.Windows.Interop.WindowInteropHelper $w).Handle.ToInt64()
 }

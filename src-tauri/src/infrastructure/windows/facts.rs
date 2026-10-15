@@ -16,7 +16,7 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetClassNameW, GetDesktopWindow, GetParent, GetWindow, GetWindowLongW, GetWindowRect,
     GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, GWL_EXSTYLE,
-    GW_OWNER, MONITORINFOF_PRIMARY, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    GWL_STYLE, GW_OWNER, MONITORINFOF_PRIMARY, WS_CAPTION, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 use crate::domain::desktop::Monitor;
@@ -62,11 +62,33 @@ pub fn visible_frame(id: isize) -> Option<Rect> {
 }
 
 fn monitor_rects(id: isize) -> Option<(Rect, Rect)> {
+    monitor_info(id).map(|(_, bounds, work)| (bounds, work))
+}
+
+/// Monitor que contiene la ventana: (id, pantalla completa, área útil).
+fn monitor_info(id: isize) -> Option<(u32, Rect, Rect)> {
     unsafe {
         let mon = MonitorFromWindow(hwnd_from(id), MONITOR_DEFAULTTOPRIMARY);
         let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
         GetMonitorInfoW(mon, &mut info).ok().ok()?;
-        Some((to_rect(info.rcMonitor), to_rect(info.rcWork)))
+        Some((mon.0 as usize as u32, to_rect(info.rcMonitor), to_rect(info.rcWork)))
+    }
+}
+
+/// ¿La ventana cubre todo su monitor sin barra de título (juego o F11)? Y en qué monitor está (§6.4).
+pub fn fullscreen_state(id: isize) -> Option<(bool, Option<u32>)> {
+    if !window_exists(id) {
+        return None;
+    }
+    let hwnd = hwnd_from(id);
+    let rect = window_rect(id)?;
+    let (mon_id, bounds, _) = monitor_info(id)?;
+    unsafe {
+        let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+        let has_caption = style & WS_CAPTION.0 == WS_CAPTION.0;
+        let covers = rect.x <= bounds.x && rect.y <= bounds.y && rect.right() >= bounds.right() && rect.bottom() >= bounds.bottom();
+        let on = IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool();
+        Some((covers && !has_caption && on, Some(mon_id)))
     }
 }
 
@@ -87,6 +109,7 @@ pub fn list_monitors() -> Vec<Monitor> {
             v.push(Monitor {
                 id: mon.0 as usize as u32,
                 work_area: to_rect(info.rcWork),
+                bounds: to_rect(info.rcMonitor),
                 primary: info.dwFlags & MONITORINFOF_PRIMARY != 0,
             });
         }
@@ -118,10 +141,7 @@ pub fn facts_of(id: isize) -> Option<WindowFacts> {
         );
 
         let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-        let rect = window_rect(id).unwrap_or_default();
-        let fullscreen = monitor_rects(id)
-            .map(|(mon, _)| rect.w >= mon.w && rect.h >= mon.h && rect.x <= mon.x && rect.y <= mon.y)
-            .unwrap_or(false);
+        let (fullscreen, monitor) = fullscreen_state(id).unwrap_or((false, None));
 
         Some(WindowFacts {
             handle: id,
@@ -137,6 +157,7 @@ pub fn facts_of(id: isize) -> Option<WindowFacts> {
             own_process: pid == GetCurrentProcessId(),
             minimized: IsIconic(hwnd).as_bool(),
             fullscreen,
+            monitor,
         })
     }
 }

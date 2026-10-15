@@ -44,3 +44,14 @@ Decisiones tomadas durante el desarrollo autónomo. Las marcadas **(por defecto,
 - **D-20 Recarga.** `alt+shift+r` relee el archivo; si es inválido (TOML, tecla/acción desconocida o misma combinación en dos acciones) no cambia nada y avisa con todos los errores (§13).
 - **D-21 Interpretación de §8.8.** La regla "dos atajos no pueden estar asignados a la misma acción" contradice "un atajo puede tener varias combinaciones". Se implementó lo que pide §13: **una combinación no puede estar en dos acciones** dentro del mismo modo; una acción sí puede tener varias combinaciones.
 - **D-22 Avisos.** Los avisos al usuario se escriben en stderr y se emiten como evento `wm-notice` de Tauri. La interfaz que los muestre llega con la barra (Fase 5).
+
+## Fase 4 (exclusiones y pantalla completa)
+
+- **D-23 Alcance de exclusiones.** Solo existe "siempre" (por ejecutable, con título como criterio adicional opcional). Los alcances por workspace/monitor/solo pantalla completa de §6.5 quedan fuera de la primera versión, como propone el propio plan.
+- **D-24 Persistencia.** La lista vive en `%APPDATA%\window-manager\exclusions.json`, escrita por el panel (no se edita a mano). La primera vez se siembra con las reglas `ignore` del config.yaml de GlazeWM que se pueden expresar por ejecutable (juegos, explorer, zebar, PiP de navegadores, PowerToys Peek).
+- **D-25 Reglas de ventana.** Las reglas "mover a workspace" y "flotante centrado" (§16) se guardan en `config.toml` (`[[window_rule]]`), migradas del config.yaml. Gestionarlas desde la interfaz queda pendiente (ver BLOCKERS B-5).
+- **D-26 Detección de pantalla completa.** Una ventana está en pantalla completa si cubre todo su monitor y no tiene barra de título (juegos, F11, borderless). Se revisa cada 0,5 s para todas las ventanas seguidas, gestionadas o excluidas. Una gestionada en pantalla completa sale del layout y vuelve a su columna al salir (§7).
+- **D-27 `alt+f`.** La ventana enfocada pasa a cubrir todo el monitor (incluida la zona de la barra) y oculta la barra; otra pulsación la devuelve a su columna.
+- **D-28 Excluida con el foco.** Mientras una ventana excluida tenga el foco, los atajos que mueven, redimensionan, cierran, minimizan, flotan o envían a otro workspace no hacen nada (no actúan sobre otra ventana a sus espaldas). Los atajos de foco y de workspace siguen funcionando.
+- **D-29 Señal de la barra.** La visibilidad de la barra por monitor sale como efecto `SetBar`; hasta la Fase 5 llega al frontend como evento Tauri `wm-bar-visibility` `[monitor, visible]`.
+- **D-30 Orden de arranque.** Los atajos se registran antes de adoptar ventanas (se descubrió una carrera real: una pulsación justo tras adoptar se perdía).

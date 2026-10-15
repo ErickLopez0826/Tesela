@@ -46,11 +46,11 @@ fn atajos_modo_redimensionar_recarga_y_salida() {
     std::env::set_var("WM_STATE_DIR", std::env::temp_dir().join("wm-test-state"));
 
     let original = [
-        kb("workspace_5", "ctrl+alt+f1", None),
-        kb("workspace_1", "ctrl+alt+f2", None),
-        kb("resize_mode", "ctrl+alt+f3", None),
-        kb("reload_config", "ctrl+alt+f4", None),
-        kb("exit", "ctrl+alt+f8", None),
+        kb("workspace_5", "ctrl+alt+f15", None),
+        kb("workspace_1", "ctrl+alt+f16", None),
+        kb("resize_mode", "ctrl+alt+f17", None),
+        kb("reload_config", "ctrl+alt+f18", None),
+        kb("exit", "ctrl+alt+f20", None),
         kb("resize_width_+2", "f13", Some("resize")),
         kb("exit_resize_mode", "f14", Some("resize")),
     ]
@@ -82,14 +82,14 @@ fn atajos_modo_redimensionar_recarga_y_salida() {
     assert!(notices.lock().unwrap().is_empty(), "sin avisos al arrancar: {:?}", notices.lock().unwrap());
 
     // 1. Atajo real -> cambia de workspace (oculta) y vuelve.
-    ctrl_alt_f(1);
+    ctrl_alt_f(15);
     wait_until("workspace 5 oculta las ventanas", || w.ids.iter().all(|&id| hidden(id)));
-    ctrl_alt_f(2);
+    ctrl_alt_f(16);
     wait_until("workspace 1 las muestra", || w.ids.iter().all(|&id| !hidden(id)));
 
     // 2. Modo redimensionar: F13 solo existe dentro del modo.
     let before = widths();
-    ctrl_alt_f(3);
+    ctrl_alt_f(17);
     std::thread::sleep(std::time::Duration::from_millis(500));
     press_chord(&[f(13)]);
     wait_until("el ancho de la ventana enfocada crece 2%", || {
@@ -106,30 +106,30 @@ fn atajos_modo_redimensionar_recarga_y_salida() {
     assert_eq!(widths(), after_exit);
 
     // 3. Recarga con configuración inválida (misma combinación en dos acciones): conserva los atajos y avisa.
-    let broken = [original.clone(), kb("focus_left", "ctrl+alt+f9", None), kb("focus_right", "ctrl+alt+f9", None)].join("\n");
+    let broken = [original.clone(), kb("focus_left", "ctrl+alt+f21", None), kb("focus_right", "ctrl+alt+f21", None)].join("\n");
     std::fs::write(config_path(), config_text(&broken)).unwrap();
-    ctrl_alt_f(4);
-    wait_until("aviso de configuración inválida", || notices.lock().unwrap().iter().any(|n| n.contains("inválida") && n.contains("ctrl+alt+f9")));
-    ctrl_alt_f(1);
+    ctrl_alt_f(18);
+    wait_until("aviso de configuración inválida", || notices.lock().unwrap().iter().any(|n| n.contains("inválida") && n.contains("ctrl+alt+f21")));
+    ctrl_alt_f(15);
     wait_until("los atajos anteriores siguen vivos", || w.ids.iter().all(|&id| hidden(id)));
-    ctrl_alt_f(2);
+    ctrl_alt_f(16);
     wait_until("vuelven", || w.ids.iter().all(|&id| !hidden(id)));
 
-    // 4. Recarga válida con un atajo distinto: ctrl+alt+f1 deja de existir, ctrl+alt+f7 lo reemplaza.
-    let remapped = original.replace("ctrl+alt+f1\"", "ctrl+alt+f7\"");
+    // 4. Recarga válida con un atajo distinto: ctrl+alt+f15 deja de existir, ctrl+alt+f19 lo reemplaza.
+    let remapped = original.replace("ctrl+alt+f15\"", "ctrl+alt+f19\"");
     std::fs::write(config_path(), config_text(&remapped)).unwrap();
-    ctrl_alt_f(4);
+    ctrl_alt_f(18);
     wait_until("aviso de recarga", || notices.lock().unwrap().iter().any(|n| n.contains("recargada")));
-    ctrl_alt_f(1);
+    ctrl_alt_f(15);
     std::thread::sleep(std::time::Duration::from_millis(600));
     assert!(w.ids.iter().all(|&id| !hidden(id)), "el atajo viejo ya no hace nada");
-    ctrl_alt_f(7);
+    ctrl_alt_f(19);
     wait_until("el atajo nuevo funciona", || w.ids.iter().all(|&id| hidden(id)));
-    ctrl_alt_f(2);
+    ctrl_alt_f(16);
     wait_until("vuelven otra vez", || w.ids.iter().all(|&id| !hidden(id)));
 
     // 5. Salir de la app: restaura ventanas y avisa al anfitrión.
-    ctrl_alt_f(8);
+    ctrl_alt_f(20);
     wait_until("la app pide salir", || exited.load(Ordering::SeqCst));
     wait_until("ventanas restauradas al salir", || {
         w.ids.iter().zip(&originals).all(|(&id, o)| window_manager_lib::infrastructure::windows::facts::window_rect(id).unwrap() == *o)

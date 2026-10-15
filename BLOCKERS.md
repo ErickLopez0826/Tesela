@@ -16,3 +16,9 @@ GlazeWM sigue corriendo y ya registra `alt+h`, `alt+1`, etc. Dos programas no pu
 
 ## B-4 Redacción de §8.8
 "Dos atajos no pueden estar asignados a la misma acción" choca con "un atajo puede tener varias combinaciones, como ahora" (alt+h y alt+left hacen lo mismo). Implementé la lectura de §13: una *combinación* no puede ir a dos acciones. Conviene corregir la redacción en el plan.
+
+## B-5 Pendientes de la Fase 4
+- Las reglas de ventana (`[[window_rule]]`) se editan en `config.toml`; el plan (§16) pide también gestionarlas desde la interfaz. No hay panel para eso todavía.
+- Reglas de GlazeWM no migradas por depender de la clase de ventana (no está en el plan): Excel/Word/PowerPoint distintos de su ventana principal, Lively (clase HwndWrapper) y PowerToys PowerAccent. También las que solo usan título (Isaac, Mewgenics...): la exclusión es por ejecutable (§6.3). Se pueden añadir desde el panel.
+- Bordes de ventana enfocada/no enfocada con colores (§16, "conceptos que se conservan") no aparecen en ninguna fase de §12; no se implementaron. Propuesta: añadirlos en la Fase 5 con DWMWA_BORDER_COLOR.
+- No pude comprobar visualmente el panel de exclusiones dentro de la ventana de Tauri (solo pruebas de componente con Vitest y el comando Rust).

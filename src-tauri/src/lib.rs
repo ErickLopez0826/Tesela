@@ -32,10 +32,6 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<CliArgs, St
     Ok(out)
 }
 
-/// Guarda el gestor en marcha para detenerlo al cerrar la app.
-#[cfg(windows)]
-struct ManagerState(std::sync::Mutex<Option<infrastructure::windows::runtime::Runtime>>);
-
 pub fn run() {
     let args = match parse_args(std::env::args().skip(1)) {
         Ok(a) => a,
@@ -52,8 +48,18 @@ pub fn run() {
         return;
     }
 
+    let store = std::sync::Arc::new(infrastructure::exclusion_store::ExclusionStore::load_or_seed(
+        infrastructure::exclusion_store::ExclusionStore::default_path(),
+    ));
+
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![interface::commands::list_windows])
+        .manage(interface::commands::AppState::new(store.clone()))
+        .invoke_handler(tauri::generate_handler![
+            interface::commands::list_windows,
+            interface::commands::list_exclusions,
+            interface::commands::add_exclusion,
+            interface::commands::remove_exclusion,
+        ])
         .setup(move |app| {
             #[cfg(windows)]
             if let Some(scope) = args.manage.clone() {
@@ -67,6 +73,12 @@ pub fn run() {
                         let _ = h.emit("wm-notice", text.to_string());
                     })
                 };
+                let bar: Arc<dyn Fn(u32, bool) + Send + Sync> = {
+                    let h = handle.clone();
+                    Arc::new(move |monitor: u32, visible: bool| {
+                        let _ = h.emit("wm-bar-visibility", (monitor, visible));
+                    })
+                };
                 let (config, warning) = infrastructure::config_file::load_or_create();
                 if let Some(w) = warning {
                     eprintln!("[wm] {w}");
@@ -75,11 +87,14 @@ pub fn run() {
                 let options = infrastructure::windows::runtime::RuntimeOptions {
                     loader: Some(Box::new(infrastructure::config_file::load_file)),
                     notice,
+                    bar,
+                    exclusions: store.list(),
                     on_exit: Box::new(move || handle.exit(0)),
                     ..infrastructure::windows::runtime::RuntimeOptions::from_config(scope, config)
                 };
                 let runtime = infrastructure::windows::runtime::Runtime::start_with(options);
-                app.manage(ManagerState(std::sync::Mutex::new(Some(runtime))));
+                let state = app.state::<interface::commands::AppState>();
+                *state.manager.lock().unwrap() = Some(runtime);
             }
             let _ = &app;
             Ok(())
@@ -90,8 +105,8 @@ pub fn run() {
     app.run(|_app, event| {
         if let tauri::RunEvent::Exit = event {
             #[cfg(windows)]
-            if let Some(state) = _app.try_state::<ManagerState>() {
-                if let Some(rt) = state.0.lock().unwrap().take() {
+            if let Some(state) = _app.try_state::<interface::commands::AppState>() {
+                if let Some(rt) = state.manager.lock().unwrap().take() {
                     rt.stop();
                 }
             }

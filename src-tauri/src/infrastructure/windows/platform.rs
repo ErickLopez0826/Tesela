@@ -24,7 +24,7 @@ use crate::domain::desktop::Monitor;
 use crate::domain::geometry::Rect;
 use crate::domain::manageable::WindowFacts;
 use crate::infrastructure::windows::facts::{
-    facts_of, hwnd_from, list_monitors, top_level_windows, visible_frame, window_exists, window_rect,
+    facts_of, fullscreen_state, hwnd_from, list_monitors, top_level_windows, visible_frame, window_exists, window_rect,
 };
 
 /// `DWMWA_CLOAK`: oculta la ventana sin minimizarla (§17 del plan).
@@ -42,6 +42,8 @@ pub struct Win32Platform {
     hotkey_thread: Option<u32>,
     /// Receptor de avisos para el usuario.
     notice: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    /// Receptor de la visibilidad de la barra por monitor (la barra llega en la Fase 5).
+    bar: Option<Arc<dyn Fn(u32, bool) + Send + Sync>>,
     /// Posición original de cada ventana la primera vez que se toca.
     originals: HashMap<WindowId, Rect>,
     /// Ventanas ocultas y con qué método.
@@ -68,8 +70,12 @@ impl Win32Platform {
         Self::default()
     }
 
-    pub fn with_hotkeys(thread_id: u32, notice: Arc<dyn Fn(&str) + Send + Sync>) -> Self {
-        Win32Platform { hotkey_thread: Some(thread_id), notice: Some(notice), ..Default::default() }
+    pub fn with_hotkeys(
+        thread_id: u32,
+        notice: Arc<dyn Fn(&str) + Send + Sync>,
+        bar: Arc<dyn Fn(u32, bool) + Send + Sync>,
+    ) -> Self {
+        Win32Platform { hotkey_thread: Some(thread_id), notice: Some(notice), bar: Some(bar), ..Default::default() }
     }
 
     /// Guarda las ventanas ocultas para poder recuperarlas con `--recover` tras un cierre brusco (D-3).
@@ -178,6 +184,12 @@ impl WindowPlatform for Win32Platform {
     }
 
     fn apply(&mut self, effect: &Effect) -> Result<(), String> {
+        if let Effect::SetBar { monitor, visible } = effect {
+            if let Some(bar) = &self.bar {
+                bar(*monitor, *visible);
+            }
+            return Ok(());
+        }
         let id = match effect {
             Effect::Place { id, .. }
             | Effect::Hide(id)
@@ -186,6 +198,7 @@ impl WindowPlatform for Win32Platform {
             | Effect::Close(id)
             | Effect::Minimize(id)
             | Effect::Restore(id) => *id,
+            Effect::SetBar { .. } => unreachable!("tratado arriba"),
         };
         if !window_exists(id) {
             return Err("la ventana ya no existe".into());
@@ -216,6 +229,7 @@ impl WindowPlatform for Win32Platform {
                     self.persist_hidden();
                 }
             }
+            Effect::SetBar { .. } => {}
             Effect::Minimize(_) => unsafe {
                 let _ = ShowWindow(hwnd_from(id), SW_MINIMIZE);
             },
@@ -239,6 +253,10 @@ impl WindowPlatform for Win32Platform {
         if self.hidden.remove(&id).is_some() {
             self.persist_hidden();
         }
+    }
+
+    fn fullscreen_state(&self, id: WindowId) -> Option<(bool, Option<u32>)> {
+        fullscreen_state(id)
     }
 
     fn set_hotkeys(&mut self, bindings: &[(Chord, Action)]) -> Vec<String> {

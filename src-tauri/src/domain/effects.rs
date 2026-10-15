@@ -12,4 +12,6 @@ pub enum Effect {
     Close(WindowId),
     Minimize(WindowId),
     Restore(WindowId),
+    /// Muestra u oculta la barra de un monitor (pantalla completa, §6.4).
+    SetBar { monitor: u32, visible: bool },
 }

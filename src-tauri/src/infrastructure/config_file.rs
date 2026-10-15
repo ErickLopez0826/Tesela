@@ -150,6 +150,21 @@ mod tests {
     }
 
     #[test]
+    fn las_reglas_de_ventana_migradas_funcionan() {
+        use crate::domain::manageable::WindowFacts;
+        use crate::domain::rules::{apply_rules, RuleOutcome};
+        let v = default();
+        let f = |exe: &str, title: &str| WindowFacts { exe: exe.into(), title: title.into(), ..Default::default() };
+        let out = |exe: &str, title: &str| apply_rules(&v.rules, &f(exe, title));
+        assert_eq!(out("Code.exe", "x"), RuleOutcome { workspace: Some(2), float: false });
+        assert_eq!(out("Discord.exe", "x"), RuleOutcome { workspace: Some(4), float: false });
+        assert_eq!(out("chrome.exe", "Mi Dashboard"), RuleOutcome { workspace: Some(0), float: false });
+        assert_eq!(out("steam.exe", "Steam"), RuleOutcome { workspace: Some(1), float: true });
+        assert_eq!(out("javaw.exe", "Minecraft"), RuleOutcome { workspace: None, float: true });
+        assert_eq!(out("notepad.exe", "x"), RuleOutcome::default());
+    }
+
+    #[test]
     fn toml_mal_formado_da_error_en_vez_de_panico() {
         assert!(parse_config("esto no es toml [[").is_err());
     }

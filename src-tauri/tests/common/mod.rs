@@ -29,6 +29,11 @@ impl Drop for TestWindows {
 /// Abre `count` ventanas WPF tituladas "<prefix> <i>" desde `tools/spawn-test-windows.ps1`,
 /// ejecutado con una copia de powershell.exe llamada Lively.exe (ver DECISIONS.md D-15).
 pub fn spawn_windows(count: usize, prefix: &str) -> TestWindows {
+    spawn_windows_with(count, prefix, false)
+}
+
+/// Como `spawn_windows`, opcionalmente sin barra de título (para simular pantalla completa).
+pub fn spawn_windows_with(count: usize, prefix: &str, borderless: bool) -> TestWindows {
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../tools/spawn-test-windows.ps1");
     let dir = std::env::temp_dir().join("wm-test");
     std::fs::create_dir_all(&dir).unwrap();
@@ -37,11 +42,15 @@ pub fn spawn_windows(count: usize, prefix: &str) -> TestWindows {
         let src = std::path::Path::new(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
         std::fs::copy(src, &exe).unwrap();
     }
-    let mut child = Command::new(exe)
-        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-STA", "-File", script, "-Count", &count.to_string(), "-Prefix", prefix])
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("powershell");
+    let mut args: Vec<String> = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-STA", "-File", script, "-Count"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    args.extend([count.to_string(), "-Prefix".into(), prefix.to_string()]);
+    if borderless {
+        args.push("-Borderless".into());
+    }
+    let mut child = Command::new(exe).args(&args).stdout(Stdio::piped()).spawn().expect("powershell");
     let stdout = child.stdout.take().unwrap();
     let (tx, rx) = channel();
     std::thread::spawn(move || {
@@ -98,4 +107,13 @@ pub fn f(n: u16) -> VIRTUAL_KEY {
 /// Ctrl+Alt+F<n>.
 pub fn ctrl_alt_f(n: u16) {
     press_chord(&[VK_CONTROL, VK_MENU, f(n)]);
+}
+
+/// Mueve una ventana (de otro proceso) a un rectángulo exacto, sin compensar sombras.
+pub fn force_rect(id: isize, r: Rect) {
+    use window_manager_lib::infrastructure::windows::facts::hwnd_from;
+    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
+    unsafe {
+        let _ = SetWindowPos(hwnd_from(id), None, r.x, r.y, r.w, r.h, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
 }

@@ -23,6 +23,7 @@ use crate::domain::actions::Action;
 use crate::domain::config::ValidConfig;
 use crate::domain::desktop::Settings;
 use crate::domain::manageable::Scope;
+use crate::domain::rules::{ExclusionList, WindowRule};
 use crate::domain::shortcuts::{Chord, Keymap};
 use crate::infrastructure::windows::facts::id_of;
 use crate::infrastructure::windows::platform::Win32Platform;
@@ -85,6 +86,10 @@ pub struct RuntimeOptions {
     pub loader: Option<ConfigLoader>,
     /// Recibe los avisos para el usuario.
     pub notice: Arc<dyn Fn(&str) + Send + Sync>,
+    /// Recibe (monitor, visible) cuando la barra de un monitor debe ocultarse o mostrarse (§6.4).
+    pub bar: Arc<dyn Fn(u32, bool) + Send + Sync>,
+    pub exclusions: ExclusionList,
+    pub rules: Vec<WindowRule>,
     /// Se llama si el usuario pide salir de la app (alt+shift+e).
     pub on_exit: Box<dyn FnOnce() + Send>,
 }
@@ -98,12 +103,15 @@ impl RuntimeOptions {
             keymap: Keymap::default(),
             loader: None,
             notice: Arc::new(|_| {}),
+            bar: Arc::new(|_, _| {}),
+            exclusions: ExclusionList::default(),
+            rules: vec![],
             on_exit: Box::new(|| {}),
         }
     }
 
     pub fn from_config(scope: Scope, config: ValidConfig) -> Self {
-        RuntimeOptions { settings: config.settings, keymap: config.keymap, ..Self::basic(scope) }
+        RuntimeOptions { settings: config.settings, keymap: config.keymap, rules: config.rules, ..Self::basic(scope) }
     }
 }
 
@@ -178,18 +186,18 @@ impl Drop for Runtime {
 }
 
 fn controller_loop(rx: Receiver<Message>, platform_thread_id: u32, options: RuntimeOptions) {
-    let RuntimeOptions { scope, settings, keymap, loader, notice, on_exit } = options;
-    let platform = Win32Platform::with_hotkeys(platform_thread_id, notice);
+    let RuntimeOptions { scope, settings, keymap, loader, notice, bar, exclusions, rules, on_exit } = options;
+    let platform = Win32Platform::with_hotkeys(platform_thread_id, notice, bar);
     // Si el controlador falla por un pánico, las ventanas ocultas se restauran antes de salir.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut controller = Controller::with_config(platform, scope, settings, keymap);
+        let mut controller = Controller::with_all(platform, scope, settings, keymap, exclusions, rules);
         if let Some(l) = loader {
             controller.set_loader(l);
         }
         let guard = RestoreOnPanic(&mut controller);
         loop {
-            // Cada 2 s se revisan los monitores (conectar/desconectar).
-            let msg = match rx.recv_timeout(Duration::from_secs(2)) {
+            // Cada 0,5 s se revisan monitores (conectar/desconectar) y pantallas completas.
+            let msg = match rx.recv_timeout(Duration::from_millis(500)) {
                 Ok(m) => m,
                 Err(RecvTimeoutError::Timeout) => Message::Tick,
                 Err(RecvTimeoutError::Disconnected) => break,
@@ -265,6 +273,9 @@ fn platform_loop(ready: Sender<u32>) {
             match msg.message {
                 WM_HOTKEY => {
                     let id = msg.wParam.0 as i32;
+                    if std::env::var("WM_TRACE").is_ok() {
+                        eprintln!("[wm-trace] WM_HOTKEY id={id}");
+                    }
                     let out = if id == EMERGENCY_HOTKEY_ID {
                         Some(Message::Emergency)
                     } else {
@@ -288,6 +299,9 @@ fn platform_loop(ready: Sender<u32>) {
                         } else {
                             failed.push(chord.to_string());
                         }
+                    }
+                    if std::env::var("WM_TRACE").is_ok() {
+                        eprintln!("[wm-trace] hotkeys registrados: {} fallidos: {:?}", actions.len(), failed);
                     }
                     let _ = req.reply.send(failed);
                 }

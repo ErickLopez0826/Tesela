@@ -42,6 +42,50 @@ name = "8"
 [[workspace]]
 name = "9"
 
+# Reglas de ventana (§16, migradas del config.yaml de GlazeWM): mandar a un workspace y/o flotar centrada.
+# Una ventana puede cumplir varias reglas: el primer workspace indicado gana y basta una regla `float`.
+# `exe` se compara sin mayúsculas ni ".exe"; `title_contains` ignora mayúsculas.
+[[window_rule]]
+title_contains = "dashboard"
+workspace = 1
+[[window_rule]]
+exe = "steam"
+workspace = 2
+[[window_rule]]
+exe = "steamwebhelper"
+workspace = 2
+[[window_rule]]
+exe = "EpicGamesLauncher"
+workspace = 2
+[[window_rule]]
+exe = "Antigravity"
+workspace = 3
+[[window_rule]]
+exe = "devenv"
+workspace = 3
+[[window_rule]]
+exe = "Code"
+workspace = 3
+[[window_rule]]
+exe = "Discord"
+workspace = 5
+[[window_rule]]
+exe = "Spotify"
+workspace = 5
+
+[[window_rule]]
+exe = "Flow.Launcher"
+float = true
+[[window_rule]]
+exe = "javaw"
+float = true
+[[window_rule]]
+exe = "steam"
+float = true
+[[window_rule]]
+exe = "PowerToys.PowerLauncher"
+float = true
+
 # 8.1 Foco
 [[keybinding]]
 action = "focus_left"

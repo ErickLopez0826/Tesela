@@ -15,6 +15,8 @@ pub struct WindowFacts {
     pub own_process: bool,
     pub minimized: bool,
     pub fullscreen: bool,
+    /// Monitor (id de `Monitor`) donde está la ventana.
+    pub monitor: Option<u32>,
 }
 
 /// Qué ventanas puede gestionar el gestor (ver DECISIONS.md D-1).

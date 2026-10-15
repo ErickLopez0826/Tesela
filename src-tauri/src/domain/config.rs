@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 use crate::domain::desktop::{Settings, WORKSPACE_COUNT};
 use crate::domain::layout::{Axis, Gaps, LayoutSettings};
+use crate::domain::rules::WindowRule;
 use crate::domain::shortcuts::{BindingSpec, Keymap};
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -69,6 +70,8 @@ pub struct Config {
     pub workspaces: Vec<WorkspaceConfig>,
     #[serde(rename = "keybinding")]
     pub keybindings: Vec<KeybindingConfig>,
+    #[serde(rename = "window_rule")]
+    pub window_rules: Vec<WindowRule>,
 }
 
 fn parse_axis(name: &str, field: &str, errors: &mut Vec<String>) -> Axis {
@@ -87,6 +90,7 @@ fn parse_axis(name: &str, field: &str, errors: &mut Vec<String>) -> Axis {
 pub struct ValidConfig {
     pub settings: Settings,
     pub keymap: Keymap,
+    pub rules: Vec<WindowRule>,
 }
 
 impl Config {
@@ -121,6 +125,20 @@ impl Config {
             }
         }
 
+        for (i, r) in self.window_rules.iter().enumerate() {
+            if r.exe.is_none() && r.title_contains.is_none() {
+                errors.push(format!("window_rule #{}: necesita 'exe' o 'title_contains'", i + 1));
+            }
+            if let Some(w) = r.workspace {
+                if !(1..=9).contains(&w) {
+                    errors.push(format!("window_rule #{}: workspace {w} fuera de 1..9", i + 1));
+                }
+            }
+            if r.workspace.is_none() && !r.float {
+                errors.push(format!("window_rule #{}: no hace nada (falta 'workspace' o 'float')", i + 1));
+            }
+        }
+
         let specs: Vec<BindingSpec> = self
             .keybindings
             .iter()
@@ -148,6 +166,7 @@ impl Config {
                     float_size: (l.float_width, l.float_height),
                 },
                 keymap,
+                rules: self.window_rules.clone(),
             }),
             _ => Err(errors),
         }
@@ -191,6 +210,7 @@ mod tests {
             layout: LayoutConfig { vertical_axis: "diagonal".into(), min_column_width: 0, ..Default::default() },
             workspaces: vec![WorkspaceConfig { name: "12".into(), monitor: None }],
             keybindings: vec![kb("focus_left", &["alt+h"]), kb("move_left", &["alt+h"])],
+            ..Default::default()
         };
         let errs = c.validate().unwrap_err();
         assert!(errs.len() >= 4, "{errs:?}");

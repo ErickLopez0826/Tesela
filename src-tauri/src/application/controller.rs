@@ -3,9 +3,10 @@
 use crate::application::ports::WindowPlatform;
 use crate::domain::actions::Action;
 use crate::domain::config::ValidConfig;
-use crate::domain::desktop::{Desktop, Settings};
+use crate::domain::desktop::{Desktop, Settings, TrackOptions};
 use crate::domain::effects::{Effect, WindowId};
 use crate::domain::manageable::{is_manageable, Scope};
+use crate::domain::rules::{apply_rules, ExclusionList, WindowRule};
 use crate::domain::shortcuts::Keymap;
 
 /// Nombre del modo de teclado que activa `EnterResizeMode`.
@@ -23,7 +24,9 @@ pub enum Message {
     Action(Action),
     /// Atajo de emergencia: pausa y restaura; una segunda vez reanuda.
     Emergency,
-    /// Revisión periódica (cambios de monitores).
+    /// La lista de exclusiones cambió (desde el panel de exclusiones, §6.3).
+    SetExclusions(ExclusionList),
+    /// Revisión periódica (monitores y pantallas completas).
     Tick,
     /// Cierre de la app: restaura y deja de gestionar.
     Shutdown,
@@ -38,6 +41,8 @@ pub struct Controller<P: WindowPlatform> {
     scope: Scope,
     settings: Settings,
     keymap: Keymap,
+    exclusions: ExclusionList,
+    rules: Vec<WindowRule>,
     mode: Option<String>,
     loader: Option<ConfigLoader>,
     paused: bool,
@@ -50,6 +55,17 @@ impl<P: WindowPlatform> Controller<P> {
     }
 
     pub fn with_config(platform: P, scope: Scope, settings: Settings, keymap: Keymap) -> Self {
+        Self::with_all(platform, scope, settings, keymap, ExclusionList::default(), vec![])
+    }
+
+    pub fn with_all(
+        platform: P,
+        scope: Scope,
+        settings: Settings,
+        keymap: Keymap,
+        exclusions: ExclusionList,
+        rules: Vec<WindowRule>,
+    ) -> Self {
         let desk = Desktop::new(settings.clone(), platform.monitors());
         let mut c = Controller {
             desk,
@@ -57,13 +73,17 @@ impl<P: WindowPlatform> Controller<P> {
             scope,
             settings,
             keymap,
+            exclusions,
+            rules,
             mode: None,
             loader: None,
             paused: false,
             exit_requested: false,
         };
-        c.adopt_existing();
+        // Primero los atajos (disponibles de inmediato, incluida la salida), luego se adoptan las ventanas.
         c.apply_hotkeys();
+        c.adopt_existing();
+        c.sync_bar();
         c
     }
 
@@ -106,8 +126,53 @@ impl<P: WindowPlatform> Controller<P> {
         if facts.minimized || !is_manageable(&facts, &self.scope) {
             return;
         }
-        let fx = self.desk.add_window(id);
+        let outcome = apply_rules(&self.rules, &facts);
+        let opts = TrackOptions {
+            excluded: self.exclusions.matches(&facts),
+            fullscreen: facts.fullscreen,
+            monitor: facts.monitor,
+            workspace: outcome.workspace,
+            float: outcome.float,
+        };
+        let fx = self.desk.track_window(id, opts);
         self.run(fx);
+    }
+
+    /// Aplica los cambios de visibilidad de la barra (§6.4).
+    fn sync_bar(&mut self) {
+        let fx = self.desk.sync_bar();
+        self.run(fx);
+    }
+
+    /// Revisa las ventanas seguidas: ¿entraron o salieron de pantalla completa por su cuenta?
+    fn check_fullscreen(&mut self) {
+        for (id, user) in self.desk.tracked_windows() {
+            if user {
+                continue; // la pantalla completa pedida con el atajo la controla la app
+            }
+            match self.platform.fullscreen_state(id) {
+                Some((fs, monitor)) => {
+                    let fx = self.desk.set_fullscreen(id, fs, monitor, false);
+                    self.run(fx);
+                }
+                None => {
+                    // La ventana ya no existe y no llegó el evento de cierre.
+                    let fx = self.desk.remove_window(id);
+                    self.platform.forget(id);
+                    self.run(fx);
+                }
+            }
+        }
+    }
+
+    /// Reevalúa todas las ventanas con la lista de exclusiones actual.
+    fn reapply_exclusions(&mut self) {
+        for id in self.desk.all_windows() {
+            let Some(facts) = self.platform.facts(id) else { continue };
+            let excluded = self.exclusions.matches(&facts);
+            let fx = self.desk.set_excluded(id, excluded);
+            self.run(fx);
+        }
     }
 
     fn run(&mut self, effects: Vec<Effect>) {
@@ -164,6 +229,7 @@ impl<P: WindowPlatform> Controller<P> {
         match loader() {
             Ok(valid) => {
                 self.keymap = valid.keymap;
+                self.rules = valid.rules;
                 self.settings = valid.settings.clone();
                 self.mode = None;
                 let fx = self.desk.update_settings(valid.settings);
@@ -208,6 +274,9 @@ impl<P: WindowPlatform> Controller<P> {
 
     /// Procesa un mensaje. Devuelve `false` cuando el controlador debe terminar.
     pub fn handle(&mut self, msg: Message) -> bool {
+        if std::env::var("WM_TRACE").is_ok() && !matches!(msg, Message::Tick) {
+            eprintln!("[wm-trace] {msg:?}");
+        }
         match msg {
             Message::Emergency => self.set_paused(!self.paused),
             Message::Shutdown => {
@@ -247,8 +316,16 @@ impl<P: WindowPlatform> Controller<P> {
                 self.run(fx);
             }
             Message::Action(a) => self.run_action(a),
-            Message::Tick => self.check_monitors(),
+            Message::SetExclusions(list) => {
+                self.exclusions = list;
+                self.reapply_exclusions();
+            }
+            Message::Tick => {
+                self.check_monitors();
+                self.check_fullscreen();
+            }
         }
+        self.sync_bar();
         true
     }
 }
@@ -281,6 +358,7 @@ pub mod fake {
         pub focus_log: Vec<WindowId>,
         pub closed: Vec<WindowId>,
         pub apply_count: usize,
+        pub bar_log: Vec<(u32, bool)>,
         pub minimize_log: Vec<WindowId>,
         /// Combinaciones que el sistema "rechaza" al registrar (simula otro programa que las usa).
         pub reject: Vec<String>,
@@ -289,7 +367,7 @@ pub mod fake {
     impl FakePlatform {
         pub fn new() -> Self {
             FakePlatform {
-                monitors: vec![Monitor { id: 0, work_area: Rect::new(0, 0, 1000, 600), primary: true }],
+                monitors: vec![Monitor::new(0, Rect::new(0, 0, 1000, 600), true)],
                 windows: HashMap::new(),
                 registered: vec![],
                 notices: vec![],
@@ -297,6 +375,7 @@ pub mod fake {
                 focus_log: vec![],
                 closed: vec![],
                 apply_count: 0,
+                bar_log: vec![],
                 minimize_log: vec![],
                 reject: vec![],
             }
@@ -360,6 +439,7 @@ pub mod fake {
                 Effect::Close(id) => self.closed.push(*id),
                 Effect::Minimize(id) => self.minimize_log.push(*id),
                 Effect::Restore(_) => {}
+                Effect::SetBar { monitor, visible } => self.bar_log.push((*monitor, *visible)),
             }
             Ok(())
         }
@@ -369,6 +449,9 @@ pub mod fake {
                 w.rect = w.original;
                 w.hidden = false;
             }
+        }
+        fn fullscreen_state(&self, id: WindowId) -> Option<(bool, Option<u32>)> {
+            self.windows.get(&id).map(|w| (w.facts.fullscreen, w.facts.monitor))
         }
         fn set_hotkeys(&mut self, bindings: &[(Chord, Action)]) -> Vec<String> {
             let (ok, bad): (Vec<_>, Vec<_>) = bindings.iter().partition(|(c, _)| !self.reject.contains(&c.to_string()));
@@ -519,7 +602,7 @@ mod tests {
         use crate::domain::desktop::Monitor;
         use crate::domain::geometry::Rect;
         let mut c = ctl_with(2);
-        c.platform.monitors = vec![Monitor { id: 0, work_area: Rect::new(0, 0, 800, 500), primary: true }];
+        c.platform.monitors = vec![Monitor::new(0, Rect::new(0, 0, 800, 500), true)];
         c.handle(Message::Tick);
         for w in c.platform().windows.values() {
             assert!(c.platform().monitors[0].work_area.contains_rect(&w.rect));
@@ -702,14 +785,11 @@ mod tests {
         assert!(globals.len() >= 58);
         let mut checked = 0;
         for (chord, action) in globals {
-            if action == Action::ToggleFullscreen {
-                continue; // Fase 4
-            }
             let mut p = FakePlatform::new();
             p.monitors = vec![
-                Monitor { id: 0, work_area: Rect::new(0, 0, 3000, 1000), primary: true },
-                Monitor { id: 1, work_area: Rect::new(3000, 0, 1000, 3000), primary: false },
-                Monitor { id: 2, work_area: Rect::new(0, 1000, 3000, 1000), primary: false },
+                Monitor::new(0, Rect::new(0, 0, 3000, 1000), true),
+                Monitor::new(1, Rect::new(3000, 0, 1000, 3000), false),
+                Monitor::new(2, Rect::new(0, 1000, 3000, 1000), false),
             ];
             for i in 1..=4 {
                 p.spawn(i, &format!("WMTEST {i}"));
@@ -726,6 +806,129 @@ mod tests {
             assert_ne!(before, snapshot(&c), "el atajo {chord} ({}) no tuvo ningún efecto", action.name());
             checked += 1;
         }
-        assert!(checked >= 57, "se comprobaron {checked} atajos");
+        assert!(checked >= 58, "se comprobaron {checked} atajos");
+    }
+
+    // ---------- Fase 4: exclusiones y pantalla completa ----------
+
+    fn excluding(exes: &[&str]) -> ExclusionList {
+        let mut l = ExclusionList::default();
+        for e in exes {
+            l.add(e, None);
+        }
+        l
+    }
+
+    fn with_exe(p: &mut FakePlatform, id: WindowId, exe: &str, title: &str) {
+        p.spawn(id, title);
+        p.windows.get_mut(&id).unwrap().facts.exe = exe.into();
+        p.windows.get_mut(&id).unwrap().facts.monitor = Some(0);
+    }
+
+    fn ctl_excl(p: FakePlatform, list: ExclusionList) -> Controller<FakePlatform> {
+        Controller::with_all(p, Scope::TitlePrefix("WMTEST".into()), Settings::default(), Keymap::default(), list, vec![])
+    }
+
+    #[test]
+    fn un_juego_y_una_app_excluida_no_se_tocan_y_las_demas_se_reparten_el_ancho() {
+        let mut p = FakePlatform::new();
+        with_exe(&mut p, 1, "editor.exe", "WMTEST editor");
+        with_exe(&mut p, 2, "juego.exe", "WMTEST juego");
+        with_exe(&mut p, 3, "app.exe", "WMTEST app");
+        with_exe(&mut p, 4, "chat.exe", "WMTEST chat");
+        let mut c = ctl_excl(p, excluding(&["juego.exe", "chat"]));
+        for id in [2, 4] {
+            let w = &c.platform().windows[&id];
+            assert!(!w.touched && w.rect == w.original, "la excluida {id} no se toca");
+        }
+        let widths: Vec<i32> = [1, 3].iter().map(|id| c.platform().windows[id].rect.w).collect();
+        assert_eq!(widths, vec![500, 500], "las gestionadas se reparten todo el ancho");
+        // Operaciones posteriores tampoco la tocan.
+        act(&mut c, Action::FocusWorkspace(2));
+        act(&mut c, Action::FocusWorkspace(1));
+        c.handle(Message::MoveEnded(2));
+        c.handle(Message::Emergency);
+        c.handle(Message::Emergency);
+        assert!(!c.platform().windows[&2].touched);
+        // Cerrar la excluida: sin estado residual.
+        c.platform.destroy(2);
+        c.handle(Message::Closed(2));
+        assert!(c.desktop().entry(2).is_none());
+        assert_eq!(c.desktop().all_windows(), vec![1, 3, 4]);
+    }
+
+    #[test]
+    fn marcar_y_desmarcar_exclusiones_en_caliente() {
+        let mut p = FakePlatform::new();
+        with_exe(&mut p, 1, "a.exe", "WMTEST a");
+        with_exe(&mut p, 2, "b.exe", "WMTEST b");
+        let mut c = ctl_excl(p, ExclusionList::default());
+        assert_eq!(c.platform().windows[&1].rect.w, 500);
+        let before = c.platform().windows[&2].rect;
+        c.handle(Message::SetExclusions(excluding(&["b.exe"])));
+        assert_eq!(c.platform().windows[&1].rect.w, 1000, "la otra ocupa todo el ancho");
+        assert_eq!(c.platform().windows[&2].rect, before, "la excluida se queda donde está");
+        c.handle(Message::SetExclusions(ExclusionList::default()));
+        assert_eq!(c.platform().windows[&1].rect.w, 500);
+    }
+
+    #[test]
+    fn pantalla_completa_detectada_oculta_la_barra_y_al_salir_reaparece() {
+        let mut p = FakePlatform::new();
+        with_exe(&mut p, 1, "a.exe", "WMTEST a");
+        with_exe(&mut p, 2, "juego.exe", "WMTEST juego");
+        let mut c = ctl_excl(p, excluding(&["juego"]));
+        assert!(c.platform().bar_log.is_empty());
+        c.platform.windows.get_mut(&2).unwrap().facts.fullscreen = true;
+        c.handle(Message::Tick);
+        assert_eq!(c.platform().bar_log, vec![(0, false)]);
+        c.handle(Message::Tick);
+        assert_eq!(c.platform().bar_log.len(), 1, "sin cambios no repite");
+        c.platform.windows.get_mut(&2).unwrap().facts.fullscreen = false;
+        c.handle(Message::Tick);
+        assert_eq!(c.platform().bar_log, vec![(0, false), (0, true)]);
+        // Una gestionada también oculta la barra.
+        c.platform.windows.get_mut(&1).unwrap().facts.fullscreen = true;
+        c.handle(Message::Tick);
+        assert_eq!(c.platform().bar_log.last(), Some(&(0, false)));
+    }
+
+    #[test]
+    fn el_foco_en_una_excluida_impide_cerrar_otra_ventana_por_error() {
+        let mut p = FakePlatform::new();
+        with_exe(&mut p, 1, "a.exe", "WMTEST a");
+        with_exe(&mut p, 2, "juego.exe", "WMTEST juego");
+        let mut c = ctl_excl(p, excluding(&["juego"]));
+        c.handle(Message::Focused(2));
+        act(&mut c, Action::CloseWindow);
+        assert!(c.platform().closed.is_empty());
+        c.handle(Message::Focused(1));
+        act(&mut c, Action::CloseWindow);
+        assert_eq!(c.platform().closed, vec![1]);
+    }
+
+    #[test]
+    fn reglas_de_ventana_mueven_a_workspace_y_flotan() {
+        use crate::domain::rules::WindowRule;
+        let mut p = FakePlatform::new();
+        with_exe(&mut p, 1, "code.exe", "WMTEST code");
+        with_exe(&mut p, 2, "javaw.exe", "WMTEST mc");
+        with_exe(&mut p, 3, "otro.exe", "WMTEST otro");
+        let rules = vec![
+            WindowRule { exe: Some("code".into()), title_contains: None, workspace: Some(3), float: false },
+            WindowRule { exe: Some("javaw".into()), title_contains: None, workspace: None, float: true },
+        ];
+        let c = Controller::with_all(
+            p,
+            Scope::TitlePrefix("WMTEST".into()),
+            Settings::default(),
+            Keymap::default(),
+            ExclusionList::default(),
+            rules,
+        );
+        assert_eq!(c.desktop().workspace_of(1), Some(2));
+        assert!(c.platform().windows[&1].hidden, "va a un workspace oculto");
+        assert_eq!(c.desktop().entry(2).unwrap().kind, crate::domain::desktop::Kind::Floating);
+        assert_eq!(c.platform().windows[&3].rect.w, 1000, "la tercera queda sola en el layout");
     }
 }

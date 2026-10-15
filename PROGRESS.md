@@ -33,3 +33,10 @@ Cómo ejecutar la prueba real: `cargo test --test phase1_windows -- --ignored --
 - ✅ Criterio "cada atajo de la sección 8 ejecuta su acción correcta": `cada_atajo_global_de_la_seccion_8_ejecuta_su_accion` pulsa cada combinación registrada en un escritorio de 3 monitores y comprueba que cambia el estado. Prueba real con teclas inyectadas en `tests/phase3_hotkeys.rs` (usa Ctrl+Alt+F<n> y F13/F14 para no chocar con GlazeWM, que sigue corriendo y ya tiene alt+...).
 - 🟡 Excepción: `alt+f` (pantalla completa) se implementa en la Fase 4.
 - Atajos con `alt+...` reales **no se pudieron probar contra el sistema** mientras GlazeWM siga corriendo (B-3); la lógica es idéntica porque solo cambia el texto de la combinación.
+
+## Fase 4: Exclusiones y pantalla completa ✅ (con pendientes menores)
+- ✅ Panel de exclusiones (Svelte): desde ventanas abiertas con un clic, por nombre de proceso o eligiendo un `.exe`, con título como criterio adicional; lista de excluidas con "Quitar". Comandos Rust `list/add/remove_exclusion`, persistencia en JSON y reevaluación en caliente de las ventanas abiertas.
+- ✅ Comportamiento de excluida (§6.2): no se mueve, no cuenta para el reparto, no recibe atajos de posición, se vigila hasta que se cierra y no deja estado.
+- ✅ Pantalla completa (§6.4): oculta la señal de barra del monitor correspondiente (gestionadas y excluidas); dos pantallas completas en monitores distintos se manejan por separado. La barra visual llega en la Fase 5; hoy la señal es el efecto `SetBar` / evento `wm-bar-visibility`.
+- ✅ Criterio "un juego y una aplicación excluida se abren y funcionan como si GlazeWM no existiera": `tests/phase4_exclusions.rs` (real) abre dos ventanas gestionadas, una app excluida y un "juego" sin borde que se agranda a pantalla completa: ni se mueven ni cambian de tamaño, el reparto no cambia, la barra se oculta y reaparece. Limitación: usa ventanas WPF de prueba, no un juego de verdad ni aplicaciones de terceros.
+- 🟡 Alcances de §6.5 distintos de "siempre": no implementados (el plan los marca como posteriores).

@@ -17,10 +17,16 @@ pub struct Monitor {
     pub id: MonitorId,
     /// Área útil (descontando la barra, §4).
     pub work_area: Rect,
+    /// Pantalla completa del monitor, para ventanas en pantalla completa.
+    pub bounds: Rect,
     pub primary: bool,
 }
 
 impl Monitor {
+    pub fn new(id: MonitorId, work_area: Rect, primary: bool) -> Self {
+        Monitor { id, work_area, bounds: work_area, primary }
+    }
+
     pub fn is_vertical(&self) -> bool {
         self.work_area.h > self.work_area.w
     }
@@ -69,6 +75,10 @@ pub struct WindowEntry {
     pub workspace: Option<usize>,
     pub minimized: bool,
     pub fullscreen: bool,
+    /// Monitor donde está la ventana (solo se conoce con certeza para las excluidas).
+    pub monitor: Option<MonitorId>,
+    /// La pantalla completa la pidió el usuario con el atajo (la app la coloca) y no la propia ventana.
+    pub user_fullscreen: bool,
     /// Columna que ocupaba al dejar el layout, para volver a su sitio (§7).
     slot: Option<usize>,
     float_rect: Option<Rect>,
@@ -76,8 +86,30 @@ pub struct WindowEntry {
 
 impl WindowEntry {
     fn new(kind: Kind, workspace: Option<usize>) -> Self {
-        WindowEntry { kind, workspace, minimized: false, fullscreen: false, slot: None, float_rect: None }
+        WindowEntry {
+            kind,
+            workspace,
+            minimized: false,
+            fullscreen: false,
+            monitor: None,
+            user_fullscreen: false,
+            slot: None,
+            float_rect: None,
+        }
     }
+}
+
+/// Opciones al empezar a seguir una ventana.
+#[derive(Debug, Clone, Default)]
+pub struct TrackOptions {
+    /// La ventana coincide con una exclusión (§6).
+    pub excluded: bool,
+    pub fullscreen: bool,
+    pub monitor: Option<MonitorId>,
+    /// Workspace destino (0..8) por una regla; por defecto el activo.
+    pub workspace: Option<usize>,
+    /// Entrar flotante (regla de ventana).
+    pub float: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -98,12 +130,15 @@ pub struct Desktop {
     active: usize,
     recent: Option<usize>,
     minimized_order: Vec<WindowId>,
+    /// La ventana con el foco del sistema es una excluida: los atajos sobre la ventana no la tocan (§6.2).
+    foreground_excluded: bool,
+    bar_state: HashMap<MonitorId, bool>,
 }
 
 impl Desktop {
     pub fn new(settings: Settings, mut monitors: Vec<Monitor>) -> Self {
         if monitors.is_empty() {
-            monitors.push(Monitor { id: 0, work_area: Rect::new(0, 0, 1920, 1080), primary: true });
+            monitors.push(Monitor::new(0, Rect::new(0, 0, 1920, 1080), true));
         }
         if !monitors.iter().any(|m| m.primary) {
             monitors[0].primary = true;
@@ -116,6 +151,8 @@ impl Desktop {
             active: 0,
             recent: None,
             minimized_order: vec![],
+            foreground_excluded: false,
+            bar_state: HashMap::new(),
         };
         let primary = d.primary_id();
         for i in 0..WORKSPACE_COUNT {
@@ -171,12 +208,23 @@ impl Desktop {
     /// Ventanas visibles del workspace (en layout y flotantes, sin minimizadas).
     pub fn windows_in(&self, ws: usize) -> Vec<WindowId> {
         let w = &self.workspaces[ws];
-        w.layout
+        let mut out: Vec<WindowId> = w
+            .layout
             .windows()
             .into_iter()
             .chain(w.floating.iter().copied())
             .filter(|id| self.windows.get(id).is_some_and(|e| !e.minimized))
-            .collect()
+            .collect();
+        // Gestionadas en pantalla completa: visibles pero fuera del layout.
+        let mut rest: Vec<WindowId> = self
+            .windows
+            .iter()
+            .filter(|(id, e)| e.workspace == Some(ws) && e.kind == Kind::Managed && !e.minimized && !out.contains(id))
+            .map(|(id, _)| *id)
+            .collect();
+        rest.sort();
+        out.extend(rest);
+        out
     }
 
     pub fn all_windows(&self) -> Vec<WindowId> {
@@ -230,7 +278,7 @@ impl Desktop {
             .collect();
         for &id in &w.floating {
             let e = &self.windows[&id];
-            if let (false, Some(rect)) = (e.minimized, e.float_rect) {
+            if let (false, false, Some(rect)) = (e.minimized, e.fullscreen, e.float_rect) {
                 fx.push(Effect::Place { id, rect });
             }
         }
@@ -349,10 +397,10 @@ impl Desktop {
         let area = self.area(ws);
         let settings = self.settings.layout;
         let float_rect = self.float_rect_for(ws);
-        let minimized = self.windows[&id].minimized;
+        let minimized = self.windows[&id].minimized || self.windows[&id].fullscreen;
         let slot = self.windows[&id].slot;
         let kind = if minimized {
-            // Minimizada: no entra en el layout; recuerda dónde volver.
+            // Minimizada o en pantalla completa: no entra en el layout; recuerda dónde volver.
             if want_float { Kind::Floating } else { Kind::Managed }
         } else if want_float {
             Kind::Floating
@@ -391,11 +439,27 @@ impl Desktop {
     }
 
     pub fn add_window_to(&mut self, id: WindowId, ws: usize) -> Vec<Effect> {
-        if self.windows.contains_key(&id) || ws >= WORKSPACE_COUNT {
+        self.track_window(id, TrackOptions { workspace: Some(ws), ..Default::default() })
+    }
+
+    /// Empieza a seguir una ventana: gestionada, o excluida (§6) que solo se vigila.
+    pub fn track_window(&mut self, id: WindowId, opts: TrackOptions) -> Vec<Effect> {
+        if self.windows.contains_key(&id) {
             return vec![];
         }
-        self.windows.insert(id, WindowEntry::new(Kind::Managed, None));
-        self.attach(id, ws, false);
+        if opts.excluded {
+            let mut e = WindowEntry::new(Kind::Excluded, None);
+            e.fullscreen = opts.fullscreen;
+            e.monitor = opts.monitor;
+            self.windows.insert(id, e);
+            return vec![];
+        }
+        let ws = opts.workspace.filter(|w| *w < WORKSPACE_COUNT).unwrap_or(self.active);
+        let mut e = WindowEntry::new(Kind::Managed, None);
+        e.fullscreen = opts.fullscreen;
+        e.monitor = opts.monitor;
+        self.windows.insert(id, e);
+        self.attach(id, ws, opts.float);
         if self.workspaces[ws].visible {
             self.place_fx(ws)
         } else {
@@ -426,6 +490,7 @@ impl Desktop {
 
     /// El sistema informa que una ventana tomó el foco.
     pub fn note_focus(&mut self, id: WindowId) {
+        self.foreground_excluded = self.windows.get(&id).is_some_and(|e| e.kind == Kind::Excluded);
         let Some(ws) = self.workspace_of(id) else { return };
         if self.windows_in(ws).contains(&id) {
             self.workspaces[ws].focused = Some(id);
@@ -683,6 +748,148 @@ impl Desktop {
         fx
     }
 
+    // ---------- pantalla completa y exclusiones (§6, §7) ----------
+
+    /// La ventana entra o sale de pantalla completa (§7: sale del layout; al volver regresa a su columna).
+    /// `user` indica que la pidió el atajo y por tanto la app la coloca cubriendo el monitor.
+    pub fn set_fullscreen(&mut self, id: WindowId, fullscreen: bool, monitor: Option<MonitorId>, user: bool) -> Vec<Effect> {
+        let Some(entry) = self.windows.get(&id).cloned() else { return vec![] };
+        {
+            let e = self.windows.get_mut(&id).unwrap();
+            if monitor.is_some() {
+                e.monitor = monitor;
+            }
+            if e.fullscreen == fullscreen {
+                return vec![];
+            }
+            e.fullscreen = fullscreen;
+            e.user_fullscreen = fullscreen && user;
+        }
+        let Some(ws) = entry.workspace else { return vec![] };
+        if entry.kind == Kind::Excluded {
+            return vec![];
+        }
+        let covers = self.monitor_of(ws).bounds;
+        let mut fx = Vec::new();
+        match entry.kind {
+            Kind::Managed if fullscreen => {
+                if !entry.minimized {
+                    let slot = self.workspaces[ws].layout.group_index_of(id);
+                    let area = self.area(ws);
+                    let settings = self.settings.layout;
+                    self.workspaces[ws].layout.remove_window(id, &area, &settings);
+                    self.windows.get_mut(&id).unwrap().slot = slot;
+                }
+                if self.workspaces[ws].visible {
+                    fx.extend(self.place_fx(ws));
+                    if user {
+                        fx.push(Effect::Place { id, rect: covers });
+                    }
+                }
+            }
+            Kind::Managed => {
+                if !entry.minimized {
+                    self.attach(id, ws, false);
+                }
+                if self.workspaces[ws].visible {
+                    fx.extend(self.place_fx(ws));
+                }
+            }
+            Kind::Floating => {
+                if self.workspaces[ws].visible {
+                    if fullscreen && user {
+                        fx.push(Effect::Place { id, rect: covers });
+                    } else if !fullscreen {
+                        fx.extend(self.place_fx(ws));
+                    }
+                }
+            }
+            Kind::Excluded => {}
+        }
+        fx
+    }
+
+    /// Alternar pantalla completa de la ventana enfocada (alt+f).
+    fn toggle_fullscreen(&mut self) -> Vec<Effect> {
+        let ws = self.active;
+        let Some(id) = self.workspaces[ws].focused else { return vec![] };
+        let Some(entry) = self.windows.get(&id) else { return vec![] };
+        let (fs, mon) = (!entry.fullscreen, self.workspaces[ws].monitor);
+        self.set_fullscreen(id, fs, Some(mon), true)
+    }
+
+    /// Marca o desmarca una ventana como excluida (§7: Gestionada → Excluida "se queda donde está").
+    pub fn set_excluded(&mut self, id: WindowId, excluded: bool) -> Vec<Effect> {
+        let Some(entry) = self.windows.get(&id).cloned() else { return vec![] };
+        if (entry.kind == Kind::Excluded) == excluded {
+            return vec![];
+        }
+        if excluded {
+            let ws = self.detach(id);
+            let e = self.windows.get_mut(&id).unwrap();
+            e.kind = Kind::Excluded;
+            e.workspace = None;
+            e.slot = None;
+            e.float_rect = None;
+            e.user_fullscreen = false;
+            self.minimized_order.retain(|&m| m != id);
+            match ws {
+                Some(ws) if self.workspaces[ws].visible => self.place_fx(ws),
+                _ => vec![],
+            }
+        } else {
+            let ws = self.active;
+            let e = self.windows.get_mut(&id).unwrap();
+            e.kind = Kind::Managed;
+            self.attach(id, ws, false);
+            if self.workspaces[ws].visible {
+                self.place_fx(ws)
+            } else {
+                vec![]
+            }
+        }
+    }
+
+    /// Ventanas que el sistema entregó como excluidas (para limpiar sus entradas al cerrarse).
+    pub fn is_excluded(&self, id: WindowId) -> bool {
+        self.windows.get(&id).is_some_and(|e| e.kind == Kind::Excluded)
+    }
+
+    /// Ventanas seguidas que están (o creen estar) en pantalla completa y se pueden revisar.
+    pub fn tracked_windows(&self) -> Vec<(WindowId, bool)> {
+        let mut v: Vec<_> = self.windows.iter().map(|(id, e)| (*id, e.user_fullscreen)).collect();
+        v.sort();
+        v
+    }
+
+    /// Visibilidad de la barra por monitor (§6.4): se oculta si cualquier ventana, gestionada o excluida,
+    /// está en pantalla completa en ese monitor. Devuelve solo los cambios desde la última llamada.
+    pub fn sync_bar(&mut self) -> Vec<Effect> {
+        let mut desired: HashMap<MonitorId, bool> = self.monitors.iter().map(|m| (m.id, true)).collect();
+        for e in self.windows.values().filter(|e| e.fullscreen) {
+            let mon = match e.kind {
+                Kind::Excluded => e.monitor,
+                _ => e.workspace.filter(|&ws| self.workspaces[ws].visible).map(|ws| self.workspaces[ws].monitor),
+            };
+            if let Some(m) = mon {
+                desired.insert(m, false);
+            }
+        }
+        let mut fx = Vec::new();
+        let mut ids: Vec<MonitorId> = desired.keys().copied().collect();
+        ids.sort();
+        for m in ids {
+            let now = desired[&m];
+            let before = self.bar_state.get(&m).copied().unwrap_or(true);
+            if now != before {
+                fx.push(Effect::SetBar { monitor: m, visible: now });
+            }
+            self.bar_state.insert(m, now);
+        }
+        self.bar_state.retain(|m, _| desired.contains_key(m));
+        fx
+    }
+
     // ---------- acciones sobre la ventana enfocada ----------
 
     pub fn focus_dir(&mut self, dir: Dir) -> Vec<Effect> {
@@ -803,6 +1010,23 @@ impl Desktop {
 
     /// Ejecuta una acción de ventana/workspace. Las acciones del sistema las atiende el controlador.
     pub fn apply_action(&mut self, action: &Action) -> Vec<Effect> {
+        if self.foreground_excluded
+            && matches!(
+                action,
+                Action::MoveDir(_)
+                    | Action::Resize { .. }
+                    | Action::MoveToWorkspace(_)
+                    | Action::ToggleStack
+                    | Action::ToggleFloating
+                    | Action::ToggleFloatingCentered
+                    | Action::ToggleFullscreen
+                    | Action::ToggleMinimize
+                    | Action::CloseWindow
+            )
+        {
+            // §6.2: una ventana excluida no recibe atajos de posición; tampoco se actúa sobre otra a sus espaldas.
+            return vec![];
+        }
         match *action {
             Action::FocusDir(d) => self.focus_dir(d),
             Action::MoveDir(d) => self.move_dir(d),
@@ -822,9 +1046,9 @@ impl Desktop {
             Action::CloseWindow => self.close_focused(),
             Action::CycleFocus => self.cycle_focus(),
             Action::Redraw => self.relayout(),
-            // Pantalla completa llega en la Fase 4; el resto es del controlador.
-            Action::ToggleFullscreen
-            | Action::EnterResizeMode
+            Action::ToggleFullscreen => self.toggle_fullscreen(),
+            // El resto es del controlador.
+            Action::EnterResizeMode
             | Action::ExitResizeMode
             | Action::OpenTerminal
             | Action::TogglePause
@@ -839,7 +1063,7 @@ mod tests {
     use super::*;
 
     fn mon(id: MonitorId, x: i32, y: i32, w: i32, h: i32, primary: bool) -> Monitor {
-        Monitor { id, work_area: Rect::new(x, y, w, h), primary }
+        Monitor::new(id, Rect::new(x, y, w, h), primary)
     }
 
     fn one() -> Desktop {
@@ -1225,5 +1449,172 @@ mod tests {
         let fx = d.add_window_to(7, 5);
         assert_eq!(fx, vec![Effect::Hide(7)]);
         assert_eq!(d.workspace_of(7), Some(5));
+    }
+
+    // ----- Exclusiones y pantalla completa (§6, §7, §13) -----
+
+    fn excluded(mon: Option<MonitorId>) -> TrackOptions {
+        TrackOptions { excluded: true, monitor: mon, ..Default::default() }
+    }
+
+    #[test]
+    fn una_ventana_excluida_no_cambia_de_posicion_ni_cuenta_para_el_reparto() {
+        let mut d = one();
+        d.add_window(1);
+        assert!(d.track_window(99, excluded(Some(0))).is_empty(), "no se le coloca nada");
+        let fx = d.add_window(2);
+        let p = placed(&fx);
+        assert_eq!(p.len(), 2, "solo las gestionadas entran en el reparto");
+        assert!(p.iter().all(|(id, r)| *id != 99 && (r.w - 1500).abs() <= 1));
+        assert!(!d.windows_in(0).contains(&99));
+        assert_eq!(d.entry(99).unwrap().kind, Kind::Excluded);
+        // Ningún efecto posterior toca a la excluida.
+        for fx in [d.relayout(), d.switch_workspace(1), d.switch_workspace(0)] {
+            assert!(fx.iter().all(|e| !matches!(e, Effect::Place { id: 99, .. } | Effect::Hide(99) | Effect::Show(99))));
+        }
+    }
+
+    #[test]
+    fn cerrar_una_excluida_no_deja_estado_residual() {
+        let mut d = one();
+        d.add_window(1);
+        d.track_window(99, TrackOptions { excluded: true, fullscreen: true, monitor: Some(0), ..Default::default() });
+        assert_eq!(d.sync_bar(), vec![Effect::SetBar { monitor: 0, visible: false }]);
+        d.remove_window(99);
+        assert!(d.entry(99).is_none());
+        assert_eq!(d.all_windows(), vec![1]);
+        assert_eq!(d.sync_bar(), vec![Effect::SetBar { monitor: 0, visible: true }], "la barra reaparece");
+        assert!(d.sync_bar().is_empty());
+    }
+
+    #[test]
+    fn gestionada_a_excluida_sale_del_layout_y_se_queda_donde_esta() {
+        let mut d = one();
+        for i in 1..=3 {
+            d.add_window(i);
+        }
+        let fx = d.set_excluded(2, true);
+        let p = placed(&fx);
+        assert_eq!(p.len(), 2);
+        assert!(p.iter().all(|(id, _)| *id != 2), "no se mueve la excluida");
+        assert_eq!(d.workspace(0).layout.group_windows(), vec![vec![1], vec![3]]);
+        assert_eq!(d.workspace_of(2), None);
+        // Y de vuelta: entra al final del workspace activo.
+        d.set_excluded(2, false);
+        assert!(d.workspace(0).layout.contains(2));
+        assert!(d.set_excluded(2, false).is_empty());
+    }
+
+    #[test]
+    fn los_atajos_de_posicion_no_actuan_si_el_foco_es_una_excluida() {
+        let mut d = one();
+        d.add_window(1);
+        d.add_window(2);
+        d.track_window(99, excluded(Some(0)));
+        d.note_focus(99);
+        for a in [
+            Action::MoveDir(Dir::Left),
+            Action::Resize { orientation: Orientation::X, percent: 2 },
+            Action::ToggleFloating,
+            Action::ToggleStack,
+            Action::ToggleFullscreen,
+            Action::CloseWindow,
+            Action::ToggleMinimize,
+            Action::MoveToWorkspace(3),
+        ] {
+            assert!(d.apply_action(&a).is_empty(), "{a:?} no debe actuar sobre otra ventana");
+        }
+        // Al volver a una gestionada los atajos funcionan otra vez.
+        d.note_focus(1);
+        assert!(!d.apply_action(&Action::CloseWindow).is_empty());
+    }
+
+    #[test]
+    fn pantalla_completa_gestionada_sale_del_layout_y_oculta_la_barra() {
+        let mut d = one();
+        for i in 1..=3 {
+            d.add_window(i);
+        }
+        let fx = d.set_fullscreen(2, true, Some(0), false);
+        assert_eq!(placed(&fx).len(), 2, "las otras dos se reparten el ancho");
+        assert!(placed(&fx).iter().all(|(id, _)| *id != 2), "la ventana en pantalla completa no se toca");
+        assert_eq!(d.workspace(0).layout.group_windows(), vec![vec![1], vec![3]]);
+        assert_eq!(d.sync_bar(), vec![Effect::SetBar { monitor: 0, visible: false }]);
+        assert!(d.windows_in(0).contains(&2), "sigue siendo una ventana visible del workspace");
+        // Salir: vuelve a su columna y reaparece la barra.
+        d.set_fullscreen(2, false, Some(0), false);
+        assert_eq!(d.workspace(0).layout.group_windows(), vec![vec![1], vec![2], vec![3]]);
+        assert_eq!(d.sync_bar(), vec![Effect::SetBar { monitor: 0, visible: true }]);
+    }
+
+    #[test]
+    fn dos_pantallas_completas_en_monitores_distintos_ocultan_cada_barra() {
+        let mut d = two();
+        d.add_window(1);
+        d.switch_workspace(4);
+        d.add_window(2);
+        d.set_fullscreen(1, true, Some(0), false);
+        assert_eq!(d.sync_bar(), vec![Effect::SetBar { monitor: 0, visible: false }]);
+        d.set_fullscreen(2, true, Some(1), false);
+        assert_eq!(d.sync_bar(), vec![Effect::SetBar { monitor: 1, visible: false }]);
+        d.set_fullscreen(1, false, Some(0), false);
+        assert_eq!(d.sync_bar(), vec![Effect::SetBar { monitor: 0, visible: true }], "solo reaparece la del monitor 0");
+        d.set_fullscreen(2, false, Some(1), false);
+        assert_eq!(d.sync_bar(), vec![Effect::SetBar { monitor: 1, visible: true }]);
+    }
+
+    #[test]
+    fn pantalla_completa_de_una_excluida_oculta_la_barra_de_su_monitor() {
+        let mut d = two();
+        d.track_window(50, TrackOptions { excluded: true, monitor: Some(1), ..Default::default() });
+        assert!(d.sync_bar().is_empty());
+        d.set_fullscreen(50, true, Some(1), false);
+        assert_eq!(d.sync_bar(), vec![Effect::SetBar { monitor: 1, visible: false }]);
+    }
+
+    #[test]
+    fn pantalla_completa_en_un_workspace_oculto_no_oculta_la_barra() {
+        let mut d = one();
+        d.add_window(1);
+        d.set_fullscreen(1, true, Some(0), false);
+        d.sync_bar();
+        d.switch_workspace(3);
+        assert_eq!(d.sync_bar(), vec![Effect::SetBar { monitor: 0, visible: true }]);
+        d.switch_workspace(0);
+        assert_eq!(d.sync_bar(), vec![Effect::SetBar { monitor: 0, visible: false }]);
+    }
+
+    #[test]
+    fn alt_f_coloca_la_ventana_cubriendo_el_monitor_y_alterna() {
+        let mut d = one();
+        d.add_window(1);
+        d.add_window(2);
+        let fx = d.apply_action(&Action::ToggleFullscreen);
+        assert!(placed(&fx).contains(&(2, Rect::new(0, 0, 3000, 1000))));
+        assert!(d.entry(2).unwrap().user_fullscreen);
+        assert_eq!(d.sync_bar().len(), 1);
+        let fx = d.apply_action(&Action::ToggleFullscreen);
+        assert_eq!(placed(&fx).len(), 2);
+        assert_eq!(d.workspace(0).layout.group_windows(), vec![vec![1], vec![2]]);
+    }
+
+    #[test]
+    fn ventana_que_nace_en_pantalla_completa_no_entra_al_layout() {
+        let mut d = one();
+        d.add_window(1);
+        let fx = d.track_window(7, TrackOptions { fullscreen: true, monitor: Some(0), ..Default::default() });
+        assert_eq!(placed(&fx), vec![(1, Rect::new(0, 0, 3000, 1000))]);
+        assert_eq!(d.sync_bar(), vec![Effect::SetBar { monitor: 0, visible: false }]);
+    }
+
+    #[test]
+    fn reglas_de_ventana_workspace_y_flotante() {
+        let mut d = one();
+        let fx = d.track_window(5, TrackOptions { workspace: Some(2), ..Default::default() });
+        assert_eq!(fx, vec![Effect::Hide(5)], "va a un workspace oculto");
+        assert_eq!(d.workspace_of(5), Some(2));
+        let fx = d.track_window(6, TrackOptions { float: true, ..Default::default() });
+        assert_eq!(d.entry(6).unwrap().kind, Kind::Floating);
+        assert_eq!(placed(&fx)[0].1.center(), (1500, 500));
     }
 }
