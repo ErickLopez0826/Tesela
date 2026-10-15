@@ -1,0 +1,11 @@
+{
+  "id": "probe",
+  "name": "Sonda de permisos (solo para pruebas)",
+  "version": "1.0.0",
+  "author": "Erick",
+  "description": "Intenta usar todas las funciones de la API del núcleo para comprobar qué permite y qué rechaza.",
+  "min_core_version": "0.1.0",
+  "permissions": ["windows", "files", "notifications", "power", "system"],
+  "entry": "index.html",
+  "ui": { "panel": { "title": "Sonda", "height": 80 } }
+}

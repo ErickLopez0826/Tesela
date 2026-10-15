@@ -48,3 +48,16 @@ pub struct StateSnapshot {
     /// Modo de teclado activo (p. ej. "resize").
     pub mode: Option<String>,
 }
+
+/// Estado de ejemplo (3 workspaces, una ventana enfocada) para las pruebas de extremo a extremo.
+pub fn sample_state() -> StateSnapshot {
+    StateSnapshot {
+        monitors: vec![MonitorSnapshot { id: 1, primary: true, vertical: false, visible_workspace: Some(1), bar_visible: true }],
+        workspaces: (1..=3)
+            .map(|n| WorkspaceSnapshot { number: n, monitor: 1, visible: n == 1, active: n == 1, window_count: n })
+            .collect(),
+        focused: Some(FocusedSnapshot { exe: "ejemplo.exe".into(), title: "Ventana de ejemplo".into() }),
+        paused: false,
+        mode: None,
+    }
+}

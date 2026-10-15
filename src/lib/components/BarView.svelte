@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { StateSnapshot, SystemStats } from "../api/state";
+  import type { InstalledModule } from "../api/modules";
   import type { MediaInfo, VolumeState } from "../api/system";
+  import ModuleFrame from "./ModuleFrame.svelte";
   import { formatClock, formatPercent, ramPercent, workspacesFor } from "../stores/wmState";
 
   let {
@@ -11,6 +13,7 @@
     volume = null,
     media = null,
     temperature = null,
+    modules = [],
     onWorkspace,
     onPanel,
     onMute = () => {},
@@ -22,12 +25,14 @@
     volume?: VolumeState | null;
     media?: MediaInfo | null;
     temperature?: number | null;
+    modules?: InstalledModule[];
     onWorkspace: (number: number) => void;
     onPanel: () => void;
     onMute?: (muted: boolean) => void;
   } = $props();
 
   const workspaces = $derived(workspacesFor(state, monitorId));
+  const barModules = $derived(modules.filter((m) => m.enabled && m.manifest.ui.bar));
   const mediaText = $derived(media ? [media.artist, media.title].filter(Boolean).join(" – ") : "");
 </script>
 
@@ -47,6 +52,9 @@
   </div>
 
   <div class="zone right">
+    {#each barModules as m (m.manifest.id)}
+      <ModuleFrame module={m} height={32} width={m.manifest.ui.bar?.width ?? 120} />
+    {/each}
     {#if media}<span class="media" title={mediaText}>{media.playing ? "♪" : "⏸"} {mediaText}</span>{/if}
     {#if stats}
       <span class="stat" title="CPU">CPU {formatPercent(stats.cpu_percent)}</span>

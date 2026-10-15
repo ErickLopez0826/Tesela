@@ -57,3 +57,14 @@ Cómo ejecutar la prueba real: `cargo test --test phase1_windows -- --ignored --
 - ✅ Fondos con transición: lista de imágenes de la carpeta y aplicación con `IDesktopWallpaper`; solo lectura del fondo actual verificada (B-7).
 - 🟡 Criterio "cada acción del panel funciona desde la interfaz": cada acción tiene su botón, su comando Tauri y su adaptador, y la interfaz está probada con Vitest (47 pruebas); con el sistema real se verificó todo lo que no es disruptivo. Las acciones disruptivas funcionan en modo simulado y quedan para que las confirmes (B-7).
 - Corrección encontrada al arrancar la app real: `sysinfo` inicializaba COM en el hilo principal y tumbaba la app (`RPC_E_CHANGED_MODE`); y las ventanas creadas desde el hilo principal bloqueaban el panel. Ambos corregidos (D-44).
+
+## Fase 7: Sistema de módulos instalables ✅
+- ✅ Manifiesto validado (§10.2): datos, versión mínima del núcleo, permisos, dependencias, componentes de interfaz (panel/barra), acciones y atajos sugeridos.
+- ✅ Cargador: instalación atómica desde carpeta, registro de permisos concedidos, activar/desactivar, actualizar sin perder datos, desinstalación completa.
+- ✅ Permisos (§10.3): se muestran antes de instalar; solo se entrega lo declarado **y** aceptado; revocables después.
+- ✅ API del núcleo (§10.4): ventanas/workspaces, estadísticas, energía (con modo seguro), avisos, archivos propios, suscripción a eventos.
+- ✅ Aislamiento: iframe en sandbox + CSP por permisos + protocolo propio; el módulo no toca Windows.
+- ✅ Módulo de prueba (`modules/examples/hello`) y sonda de permisos.
+- ✅ Criterio "el módulo de prueba se instala, pide permisos, funciona y se desinstala limpiamente": `tests/phase7_modules.rs` con la app REAL: (1) vista previa con 3 permisos y concesión explícita; (2) el módulo corre en su iframe, lee/escribe su contador en su carpeta, consulta el escritorio y se suscribe a eventos (segunda apertura → contador 2); (3) desinstalar borra archivos, datos y registro, y la app ya no lo encuentra. La sonda confirma que lo no concedido devuelve `permission_denied`, que no puede escapar de su carpeta de datos y que no obtiene respuesta de Tauri por la puerta de atrás.
+- ✅ Casos de §13 "Módulos": permiso no concedido → no accede (real + unitaria); desinstalar no deja procesos ni suscripciones (unitaria: suscripciones y registro; un módulo no lanza procesos); un módulo que falla no tumba el núcleo (unitaria con pánico + real).
+- 🟡 Ver B-8 (red solo por CSP, barra y acciones sin verse en la app real, instalar sin selector nativo).

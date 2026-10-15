@@ -1,0 +1,13 @@
+{
+  "id": "hello",
+  "name": "Hola (módulo de ejemplo)",
+  "version": "1.0.0",
+  "author": "Erick",
+  "description": "Módulo de prueba: muestra el workspace activo y la ventana enfocada, cuenta cuántas veces se abrió y saluda con un aviso.",
+  "min_core_version": "0.1.0",
+  "permissions": ["windows", "files", "notifications"],
+  "entry": "index.html",
+  "ui": { "panel": { "title": "Hola", "height": 150 } },
+  "actions": [{ "id": "saludar", "title": "Saludar" }],
+  "shortcuts": [{ "action": "saludar", "keys": ["alt+g"] }]
+}

@@ -7,6 +7,7 @@ pub mod effects;
 pub mod geometry;
 pub mod layout;
 pub mod manageable;
+pub mod modules;
 pub mod rules;
 pub mod shortcuts;
 pub mod snapshot;

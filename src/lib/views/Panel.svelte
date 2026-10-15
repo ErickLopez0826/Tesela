@@ -5,9 +5,11 @@
   import type { ActionOutcome, SystemMode } from "../api/system";
   import PanelView from "../components/PanelView.svelte";
   import { createPollingStore } from "../stores/polling";
+  import { createModulesStore } from "../stores/modules";
   import { createStateStore } from "../stores/wmState";
 
   const stateStore = createStateStore();
+  const modules = createModulesStore();
   const overview = createPollingStore(systemApi.overview, 2000);
   const media = createPollingStore(systemApi.mediaNow, 2000);
   const volume = createPollingStore(systemApi.volumeGet, 3000);
@@ -20,6 +22,7 @@
 
   onMount(() => {
     void stateStore.start();
+    void modules.start();
     for (const s of [overview, media, volume, radios, wallpapers]) s.start();
     clock = setInterval(() => (now = new Date()), 1000);
     systemApi.mode().then((m) => (mode = m)).catch(() => {});
@@ -27,6 +30,7 @@
 
   onDestroy(() => {
     stateStore.stop();
+    modules.stop();
     for (const s of [overview, media, volume, radios, wallpapers]) s.stop();
     clearInterval(clock);
   });
@@ -49,6 +53,7 @@
   radios={$radios ?? []}
   wallpapers={$wallpapers}
   allowChanges={mode.allow_changes}
+  modules={$modules}
   onWorkspace={(n) => void runAction(`workspace_${n}`).catch(() => {})}
   onClose={() => void closePanel()}
   onMediaCommand={(c) => void after(systemApi.mediaCommand(c), media.refresh).catch(() => {})}

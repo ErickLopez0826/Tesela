@@ -1,0 +1,4 @@
+body { margin: 0; padding: 8px 4px; font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: #e6e6e6; background: transparent; }
+.row { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+.label { opacity: 0.6; }
+.error { color: #ff8a80; }

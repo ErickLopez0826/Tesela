@@ -15,6 +15,9 @@ pub struct CliArgs {
     pub recover: bool,
     /// Muestra la barra de cada monitor (reserva espacio en pantalla).
     pub bar: bool,
+    /// Prueba de extremo a extremo de un módulo instalado: la ventana principal lo carga, anota lo que
+    /// pide a la API del núcleo y escribe el informe en `WM_SELFTEST_OUT` (solo para pruebas).
+    pub selftest_module: Option<String>,
 }
 
 pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<CliArgs, String> {
@@ -28,6 +31,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<CliArgs, St
             }
             "--recover" => out.recover = true,
             "--bar" => out.bar = true,
+            "--selftest-module" => out.selftest_module = Some(it.next().ok_or("--selftest-module necesita el id del módulo")?),
             _ => {}
         }
     }
@@ -62,8 +66,54 @@ pub fn run() {
     #[cfg(windows)]
     let services = std::sync::Arc::new(infrastructure::windows::system::build_services(allow_changes));
 
+    // Módulos instalables (§10): almacén en disco, estado compartido y API del núcleo.
+    let modules = std::sync::Arc::new(infrastructure::module_store::ModuleStore::new(
+        &infrastructure::config_file::config_dir(),
+        domain::modules::Version::parse(domain::modules::CORE_VERSION).expect("versión del núcleo x.y.z"),
+    ));
+    let last_state = std::sync::Arc::new(interface::commands::LastState::default());
+    // El aviso de un módulo necesita el AppHandle, que no existe hasta que arranca la app.
+    let handle_slot: std::sync::Arc<std::sync::Mutex<Option<tauri::AppHandle>>> = std::sync::Arc::default();
+    let module_api = {
+        let slot = handle_slot.clone();
+        std::sync::Arc::new(application::modules::ModuleApi::new(
+            modules.clone(),
+            last_state.clone(),
+            services.clone(),
+            std::sync::Arc::new(move |module: &str, text: &str| {
+                use tauri::Emitter;
+                if let Some(h) = slot.lock().unwrap().as_ref() {
+                    let _ = h.emit("wm-notice", format!("{module}: {text}"));
+                }
+            }),
+            domain::modules::CORE_VERSION,
+        ))
+    };
+    let protocol_modules = modules.clone();
+
     let app = tauri::Builder::default()
-        .manage(interface::commands::AppState::new(store.clone(), services.clone(), allow_changes))
+        .manage({
+            let mut state = interface::commands::AppState::new(
+                store.clone(),
+                services.clone(),
+                allow_changes,
+                modules.clone(),
+                module_api.clone(),
+                last_state.clone(),
+            );
+            if let Some(id) = &args.selftest_module {
+                state.selftest = Some(interface::commands::SelfTest {
+                    module: id.clone(),
+                    out: std::env::var("WM_SELFTEST_OUT").unwrap_or_default().into(),
+                });
+                // Un escritorio de ejemplo para que las consultas `windows.*` tengan qué responder.
+                last_state.set(domain::snapshot::sample_state());
+            }
+            state
+        })
+        .register_uri_scheme_protocol("wmmodule", move |_ctx, request| {
+            interface::modules_protocol::respond(&protocol_modules, request.uri().path())
+        })
         .invoke_handler(tauri::generate_handler![
             interface::commands::list_windows,
             interface::commands::list_exclusions,
@@ -86,8 +136,18 @@ pub fn run() {
             interface::commands::power_run,
             interface::commands::wallpapers_list,
             interface::commands::wallpaper_set,
+            interface::commands::modules_list,
+            interface::commands::modules_preview,
+            interface::commands::modules_install,
+            interface::commands::modules_uninstall,
+            interface::commands::modules_set_granted,
+            interface::commands::modules_set_enabled,
+            interface::commands::module_api,
+            interface::commands::selftest_config,
+            interface::commands::selftest_report,
         ])
         .setup(move |app| {
+            *handle_slot.lock().unwrap() = Some(app.handle().clone());
             #[cfg(windows)]
             setup_windows(app, &args, &store, config.clone(), warning.clone());
             let _ = (&app, &args);
@@ -169,7 +229,14 @@ fn setup_windows(
             let h = handle.clone();
             Arc::new(move |state: &domain::snapshot::StateSnapshot| {
                 if let Some(s) = h.try_state::<interface::commands::AppState>() {
-                    *s.last_state.lock().unwrap() = Some(state.clone());
+                    let before = s.last_state.set(state.clone());
+                    // Los módulos suscritos (y con permiso) reciben los cambios que les interesan.
+                    for ev in s.module_api.events_for_state_change(before.as_ref(), state) {
+                        let _ = h.emit(
+                            "wm-module-event",
+                            serde_json::json!({ "module": ev.module, "event": ev.event, "payload": ev.payload }),
+                        );
+                    }
                 }
                 let _ = h.emit("wm-state", state.clone());
             })
@@ -224,5 +291,12 @@ mod tests {
     fn recover_y_bar_se_reconocen() {
         let r = parse_args(a(&["--recover", "--bar"])).unwrap();
         assert!(r.recover && r.bar);
+    }
+
+    #[test]
+    fn selftest_de_modulo() {
+        let r = parse_args(a(&["--selftest-module", "probe"])).unwrap();
+        assert_eq!(r.selftest_module.as_deref(), Some("probe"));
+        assert!(parse_args(a(&["--selftest-module"])).is_err());
     }
 }

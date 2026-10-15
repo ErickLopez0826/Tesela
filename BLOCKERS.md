@@ -36,3 +36,12 @@ GlazeWM sigue corriendo y ya registra `alt+h`, `alt+1`, etc. Dos programas no pu
 - **Transición del fondo**: confío en la transición nativa de Windows al usar `IDesktopWallpaper`; no pude comprobar visualmente que haga fundido sin cambiar tu fondo real.
 - **Panel dentro de la ventana real**: verifiqué visualmente el diseño del panel con datos simulados (captura con Edge sin cabeza) y que la ventana del panel se crea y se muestra con la app real, pero con GlazeWM todavía corriendo este reposiciona las ventanas de la app (la ventana principal y el panel). Es un efecto de mantener GlazeWM como respaldo, no de la app.
 - Capturas de pantalla: en una comprobación visual capturé por error contenido de tus monitores (Steam, Spotify, Discord). No guardé ni usé nada de eso; ya no hago capturas de pantalla reales.
+
+## B-8 Pendientes de la Fase 7
+- **Aislamiento frente a Tauri**: dentro del iframe sí existe `window.__TAURI_INTERNALS__`, pero una llamada directa a un comando (`modules_list`) **no obtiene respuesta** (probado en la app real, esperando 8 s). La sonda de `tests/phase7_modules.rs` falla si algún día Tauri empezara a contestar. Es una garantía empírica de esta versión de Tauri/WebView2, no una declarada en su documentación; conviene volver a ejecutar esa prueba al actualizar Tauri.
+- **`network`** se aplica solo con la CSP del módulo; no pude probarlo de extremo a extremo (haría falta un servidor y un módulo de red). Lo necesitará el módulo de pareja (Fase 9).
+- El slot de la **barra** (`ui.bar`) y los botones de **acciones** del panel están implementados y probados con Vitest, pero no los vi renderizados en la app real (la prueba real usa la ventana principal).
+- **Atajos sugeridos** por un módulo: se muestran al instalar pero no se agregan solos a `config.toml`.
+- **Instalar** pide una carpeta escrita a mano (no hay selector de carpetas nativo ni formato empaquetado `.zip`); añadirlo es trivial pero requiere decidir formato y una dependencia nueva.
+- **Eventos de red** (`cambio de red`, §10.4) y `enviar mensaje a un canal` no existen todavía: el segundo es del módulo de pareja (Fase 9).
+- Los módulos **no se instalan automáticamente en la barra**: `ui.bar` solo aparece si el módulo lo declara.

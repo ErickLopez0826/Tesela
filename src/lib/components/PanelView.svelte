@@ -13,6 +13,8 @@
     WallpaperList,
   } from "../api/system";
   import { formatClock } from "../stores/wmState";
+  import type { InstalledModule } from "../api/modules";
+  import ModuleSections from "./ModuleSections.svelte";
   import ConnectivitySection from "./sections/ConnectivitySection.svelte";
   import MediaSection from "./sections/MediaSection.svelte";
   import PowerSection from "./sections/PowerSection.svelte";
@@ -28,6 +30,7 @@
     radios,
     wallpapers,
     allowChanges,
+    modules = [],
     onWorkspace,
     onClose,
     onMediaCommand,
@@ -45,6 +48,7 @@
     radios: RadioState[];
     wallpapers: WallpaperList | null;
     allowChanges: boolean;
+    modules?: InstalledModule[];
     onWorkspace: (number: number) => void;
     onClose: () => void;
     onMediaCommand: (command: MediaCommandName) => void;
@@ -86,6 +90,7 @@
   <ConnectivitySection {radios} {allowChanges} onSet={onRadio} />
   <WallpaperSection list={wallpapers} onSet={onWallpaper} />
   <PowerSection {allowChanges} onRun={onPower} />
+  <ModuleSections {modules} />
 </div>
 
 <style>

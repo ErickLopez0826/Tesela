@@ -7,7 +7,10 @@ use crate::application::list_windows as use_case;
 use crate::application::ports::SystemStatsProvider;
 use crate::domain::actions::Action;
 use crate::application::system::{list_wallpapers, resolve_wallpaper, SystemServices};
+use crate::application::modules::{ModuleApi, StateSource};
+use crate::domain::modules::Permission;
 use crate::domain::snapshot::{StateSnapshot, SystemStats};
+use crate::infrastructure::module_store::{InstallPreview, InstalledModule, ModuleStore};
 use crate::domain::system::{
     ActionOutcome, MediaCommand, MediaInfo, PowerAction, RadioKind, RadioState, SystemOverview, VolumeState,
 };
@@ -15,11 +18,38 @@ use crate::domain::rules::{ExclusionList, ExclusionRule};
 use crate::domain::window::WindowInfo;
 use crate::infrastructure::exclusion_store::ExclusionStore;
 
+/// Configuración de la prueba de extremo a extremo de un módulo.
+pub struct SelfTest {
+    pub module: String,
+    pub out: std::path::PathBuf,
+}
+
+/// Último estado del escritorio publicado por el gestor; lo leen la barra, el panel y los módulos.
+#[derive(Default)]
+pub struct LastState(pub Mutex<Option<StateSnapshot>>);
+
+impl LastState {
+    pub fn set(&self, state: StateSnapshot) -> Option<StateSnapshot> {
+        self.0.lock().unwrap().replace(state)
+    }
+}
+
+impl StateSource for LastState {
+    fn snapshot(&self) -> Option<StateSnapshot> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
 /// Estado compartido de la app: las exclusiones y, si está activo, el gestor de ventanas.
 pub struct AppState {
     pub exclusions: Arc<ExclusionStore>,
     /// Último estado publicado por el gestor, para que una barra recién abierta lo pida.
-    pub last_state: Mutex<Option<StateSnapshot>>,
+    pub last_state: Arc<LastState>,
+    /// Módulos instalables (§10): almacén en disco y API que usan.
+    pub modules: Arc<ModuleStore>,
+    pub module_api: Arc<ModuleApi>,
+    /// Solo con `--selftest-module`.
+    pub selftest: Option<SelfTest>,
     pub stats: Mutex<Box<dyn SystemStatsProvider + Send>>,
     /// Módulos de sistema y de acción (medios, energía, conectividad, fondos, volumen, estadísticas).
     pub services: Arc<SystemServices>,
@@ -33,13 +63,23 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(exclusions: Arc<ExclusionStore>, services: Arc<SystemServices>, allow_changes: bool) -> Self {
+    pub fn new(
+        exclusions: Arc<ExclusionStore>,
+        services: Arc<SystemServices>,
+        allow_changes: bool,
+        modules: Arc<ModuleStore>,
+        module_api: Arc<ModuleApi>,
+        last_state: Arc<LastState>,
+    ) -> Self {
         AppState {
             exclusions,
+            modules,
+            module_api,
+            selftest: None,
             services,
             allow_changes,
             wallpapers_dir: crate::infrastructure::config_file::config_dir().join("wallpapers"),
-            last_state: Mutex::new(None),
+            last_state,
             stats: Mutex::new(Box::new(crate::infrastructure::stats::SysinfoStats::new())),
             manager: Mutex::new(None),
         }
@@ -111,7 +151,7 @@ pub fn remove_exclusion(
 
 #[tauri::command]
 pub fn get_state(state: State<'_, AppState>) -> Option<StateSnapshot> {
-    state.last_state.lock().unwrap().clone()
+    state.last_state.snapshot()
 }
 
 #[tauri::command]
@@ -236,4 +276,97 @@ pub fn wallpapers_list(state: State<'_, AppState>) -> Result<WallpaperList, Stri
 pub fn wallpaper_set(state: State<'_, AppState>, name: String) -> Result<ActionOutcome, String> {
     let path = resolve_wallpaper(&state.wallpapers_dir, &name)?;
     state.services.wallpaper.lock().map_err(lock_err)?.set(&path.to_string_lossy())
+}
+
+// ----- Módulos instalables (Fase 7) -----
+
+/// Avisa a todas las ventanas (barra, panel, principal) de que cambió la lista de módulos.
+fn changed(app: &tauri::AppHandle) {
+    use tauri::Emitter;
+    let _ = app.emit("wm-modules-changed", ());
+}
+
+fn errors_to_string(e: Vec<String>) -> String {
+    e.join("\n")
+}
+
+#[tauri::command]
+pub fn modules_list(state: State<'_, AppState>) -> Vec<InstalledModule> {
+    state.modules.list()
+}
+
+/// Paso 1 de instalar: revisa la carpeta y devuelve los permisos que pide, sin instalar nada (§10.3).
+#[tauri::command]
+pub fn modules_preview(state: State<'_, AppState>, path: String) -> Result<InstallPreview, String> {
+    state.modules.preview(std::path::Path::new(&path)).map_err(errors_to_string)
+}
+
+/// Paso 2: instala con los permisos que el usuario aceptó.
+#[tauri::command]
+pub fn modules_install(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    granted: Vec<Permission>,
+) -> Result<InstalledModule, String> {
+    let installed = state.modules.install(std::path::Path::new(&path), &granted).map_err(errors_to_string)?;
+    changed(&app);
+    Ok(installed)
+}
+
+#[tauri::command]
+pub fn modules_uninstall(app: tauri::AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
+    // Primero se cortan sus suscripciones; después se borra todo.
+    state.module_api.unsubscribe_all(&id);
+    state.modules.uninstall(&id)?;
+    changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn modules_set_granted(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    granted: Vec<Permission>,
+) -> Result<(), String> {
+    state.modules.set_granted(&id, &granted)?;
+    changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn modules_set_enabled(app: tauri::AppHandle, state: State<'_, AppState>, id: String, enabled: bool) -> Result<(), String> {
+    if !enabled {
+        state.module_api.unsubscribe_all(&id);
+    }
+    state.modules.set_enabled(&id, enabled)?;
+    changed(&app);
+    Ok(())
+}
+
+/// Puente de la API del núcleo: el anfitrión reenvía aquí lo que el módulo pide por postMessage.
+#[tauri::command]
+pub fn module_api(
+    state: State<'_, AppState>,
+    module: String,
+    method: String,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    state.module_api.call(&module, &method, params).map_err(|e| e.to_string())
+}
+
+/// Si la app se arrancó con `--selftest-module`, id del módulo a probar.
+#[tauri::command]
+pub fn selftest_config(state: State<'_, AppState>) -> Option<String> {
+    state.selftest.as_ref().map(|t| t.module.clone())
+}
+
+/// La ventana principal entrega lo que observó; se guarda en `WM_SELFTEST_OUT` y la app termina.
+#[tauri::command]
+pub fn selftest_report(app: tauri::AppHandle, state: State<'_, AppState>, report: String) -> Result<(), String> {
+    let t = state.selftest.as_ref().ok_or("no hay prueba en curso")?;
+    std::fs::write(&t.out, report).map_err(|e| e.to_string())?;
+    app.exit(0);
+    Ok(())
 }

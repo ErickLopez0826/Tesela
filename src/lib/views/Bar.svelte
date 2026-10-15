@@ -4,12 +4,14 @@
   import { systemApi } from "../api/system";
   import BarView from "../components/BarView.svelte";
   import { createPollingStore } from "../stores/polling";
+  import { createModulesStore } from "../stores/modules";
   import { createStateStore, createStatsStore } from "../stores/wmState";
 
   // El id del monitor llega en la URL de la ventana: ?view=bar&monitor=<id>
   const monitorId = Number(new URLSearchParams(window.location.search).get("monitor") ?? 0);
 
   const stateStore = createStateStore();
+  const modules = createModulesStore();
   const statsStore = createStatsStore();
   const volume = createPollingStore(systemApi.volumeGet, 3000);
   const media = createPollingStore(systemApi.mediaNow, 3000);
@@ -20,6 +22,7 @@
 
   onMount(() => {
     void stateStore.start();
+    void modules.start();
     statsStore.start();
     volume.start();
     media.start();
@@ -29,6 +32,7 @@
 
   onDestroy(() => {
     stateStore.stop();
+    modules.stop();
     statsStore.stop();
     volume.stop();
     media.stop();
@@ -44,6 +48,7 @@
   volume={$volume}
   media={$media}
   temperature={$overview?.temperature_c ?? null}
+  modules={$modules}
   {now}
   onWorkspace={(n) => void runAction(`workspace_${n}`).catch(() => {})}
   onPanel={() => void openPanel(monitorId)}
