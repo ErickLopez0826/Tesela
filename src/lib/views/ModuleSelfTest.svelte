@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
-  import { modulesApi, type InstalledModule } from "../api/modules";
+  import { MODULE_ACTION_EVENT, modulesApi, type InstalledModule } from "../api/modules";
   import type { BridgeRecord } from "../modules/bridge";
   import ModuleFrame from "../components/ModuleFrame.svelte";
 
@@ -11,6 +11,7 @@
   let records: BridgeRecord[] = $state([]);
   let reported = false;
   let loadedSrc: string | null = $state(null);
+  let sequenceStarted = false;
 
   async function report(reason: string) {
     if (reported) return;
@@ -23,21 +24,35 @@
     module = all.find((m) => m.manifest.id === moduleId) ?? null;
     if (!module) return report("module_not_found");
     // Si el módulo no avisa de que terminó, se informa igualmente con lo observado.
-    setTimeout(() => report("timeout"), 20000);
+    setTimeout(() => report("timeout"), 40000);
   });
+
+  // Tras cargar el módulo se le dispara cada acción que declaró, como haría el usuario con los botones del panel,
+  // y se espera a que termine lo que ponga en marcha antes de informar.
+  function onLoad(src: string) {
+    loadedSrc = src;
+    if (sequenceStarted || !module || moduleId === "probe") return;
+    sequenceStarted = true;
+    const actions = module.manifest.actions;
+    actions.forEach((a, i) => {
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent(MODULE_ACTION_EVENT, { detail: { module: moduleId, action: a.id } }));
+      }, 1800 + i * 700);
+    });
+    setTimeout(() => report("settled"), 1800 + actions.length * 700 + 4500);
+  }
 
   function onRecord(r: BridgeRecord) {
     records = [...records, r];
-    // `probe.done` es la señal de fin de la sonda; el módulo de ejemplo se da por terminado tras un rato.
+    // `probe.done` es la señal de fin de la sonda de permisos.
     if (r.method === "probe.done") setTimeout(() => report("done"), 300);
-    if (r.method === "events.subscribe" && moduleId !== "probe") setTimeout(() => report("settled"), 2500);
   }
 </script>
 
 <main>
   <h1>Prueba del módulo {moduleId}</h1>
   {#if module}
-    <ModuleFrame {module} {onRecord} onLoad={(s) => (loadedSrc = s)} />
+    <ModuleFrame {module} {onRecord} {onLoad} />
   {/if}
   <ul>
     {#each records as r}

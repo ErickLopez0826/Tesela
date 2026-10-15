@@ -1,0 +1,12 @@
+{
+  "id": "notes",
+  "name": "Notas",
+  "version": "1.0.0",
+  "author": "Erick",
+  "description": "Notas rápidas en Markdown o texto plano, guardadas como archivos en una carpeta local (sin base de datos).",
+  "min_core_version": "0.1.0",
+  "permissions": ["files"],
+  "entry": "index.html",
+  "ui": { "panel": { "title": "Notas", "height": 340 } },
+  "actions": [{ "id": "nueva", "title": "Nueva nota" }]
+}

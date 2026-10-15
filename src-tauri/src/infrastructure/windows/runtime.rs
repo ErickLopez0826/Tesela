@@ -154,6 +154,11 @@ impl Runtime {
         let _ = self.tx.send(msg);
     }
 
+    /// Emisor para que otras partes de la app (p. ej. el módulo de apps) manden mensajes al gestor.
+    pub fn sender(&self) -> Sender<Message> {
+        self.tx.clone()
+    }
+
     /// Detiene el gestor devolviendo las ventanas a su posición original.
     pub fn stop(mut self) {
         self.shutdown();

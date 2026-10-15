@@ -28,16 +28,25 @@ pub enum Permission {
     Notifications,
     /// Leer estadísticas del sistema (CPU, RAM...).
     System,
+    /// Abrir aplicaciones (programas y accesos directos) en tu nombre.
+    Launch,
+    /// Leer el texto del portapapeles y copiar texto a él.
+    Clipboard,
+    /// Medir la velocidad de tu conexión (consume datos).
+    Speedtest,
 }
 
 impl Permission {
-    pub const ALL: [Permission; 6] = [
+    pub const ALL: [Permission; 9] = [
         Permission::Windows,
         Permission::Power,
         Permission::Network,
         Permission::Files,
         Permission::Notifications,
         Permission::System,
+        Permission::Launch,
+        Permission::Clipboard,
+        Permission::Speedtest,
     ];
 
     /// Texto que se le muestra al usuario antes de instalar (§10.3).
@@ -49,6 +58,9 @@ impl Permission {
             Permission::Files => "Guardar y leer archivos en su propia carpeta",
             Permission::Notifications => "Mostrarte avisos",
             Permission::System => "Ver el uso de CPU y memoria",
+            Permission::Launch => "Abrir aplicaciones en tu nombre",
+            Permission::Clipboard => "Leer y escribir el texto de tu portapapeles",
+            Permission::Speedtest => "Medir la velocidad de tu conexión (usa datos)",
         }
     }
 }

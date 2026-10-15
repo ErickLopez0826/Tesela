@@ -1,0 +1,12 @@
+{
+  "id": "clipboard",
+  "name": "Historial del portapapeles",
+  "version": "1.0.0",
+  "author": "Erick",
+  "description": "Guarda los últimos textos que copiaste para volver a copiarlos con un clic. No guarda lo que los gestores de contraseñas marcan como privado.",
+  "min_core_version": "0.1.0",
+  "permissions": ["clipboard", "files"],
+  "entry": "index.html",
+  "ui": { "panel": { "title": "Portapapeles", "height": 300 }, "bar": { "width": 90 } },
+  "actions": [{ "id": "limpiar", "title": "Limpiar historial" }]
+}

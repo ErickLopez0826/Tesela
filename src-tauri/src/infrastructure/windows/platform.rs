@@ -82,6 +82,18 @@ pub fn state_dir() -> std::path::PathBuf {
     std::path::Path::new(&base).join("window-manager")
 }
 
+/// Ventanas que la app tiene ocultas por estar en otro workspace (siguen siendo "apps abiertas").
+static MANAGED_HIDDEN: std::sync::Mutex<Vec<WindowId>> = std::sync::Mutex::new(Vec::new());
+
+pub fn hidden_by_manager() -> std::collections::HashSet<WindowId> {
+    MANAGED_HIDDEN.lock().unwrap().iter().copied().collect()
+}
+
+/// Da el foco a una ventana (con el truco de entrada nula para obtener permiso de primer plano).
+pub fn focus_window(id: WindowId) {
+    Win32Platform::focus(id);
+}
+
 fn recovery_file() -> std::path::PathBuf {
     state_dir().join("hidden-windows.txt")
 }
@@ -104,6 +116,7 @@ impl Win32Platform {
 
     /// Guarda las ventanas ocultas para poder recuperarlas con `--recover` tras un cierre brusco (D-3).
     fn persist_hidden(&self) {
+        *MANAGED_HIDDEN.lock().unwrap() = self.hidden.keys().copied().collect();
         let path = recovery_file();
         if self.hidden.is_empty() {
             let _ = std::fs::remove_file(&path);

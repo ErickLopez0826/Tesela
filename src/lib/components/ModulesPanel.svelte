@@ -80,6 +80,9 @@
     files: "Archivos propios",
     notifications: "Avisos",
     system: "Estadísticas del sistema",
+    launch: "Abrir aplicaciones",
+    clipboard: "Portapapeles",
+    speedtest: "Prueba de velocidad",
   };
 </script>
 

@@ -953,6 +953,26 @@ impl Desktop {
         }
     }
 
+    /// Enfoca una ventana concreta: cambia al workspace donde está (si no se ve), la restaura si estaba
+    /// minimizada y le da el foco. Sirve a la lista de "apps abiertas" (§9.3).
+    pub fn focus_window(&mut self, id: WindowId) -> Vec<Effect> {
+        let Some(entry) = self.windows.get(&id).cloned() else { return vec![Effect::Focus(id)] };
+        let Some(ws) = entry.workspace else {
+            // Excluida: vive donde Windows la puso; solo se le da el foco.
+            return vec![Effect::Focus(id)];
+        };
+        let mut fx = Vec::new();
+        if !self.workspaces[ws].visible || ws != self.active {
+            fx.extend(self.switch_workspace(ws));
+        }
+        if entry.minimized {
+            fx.push(Effect::Restore(id));
+        }
+        self.workspaces[ws].focused = Some(id);
+        fx.push(Effect::Focus(id));
+        fx
+    }
+
     pub fn cycle_focus(&mut self) -> Vec<Effect> {
         let ws = self.active;
         let list = self.windows_in(ws);
@@ -1656,5 +1676,47 @@ mod tests {
         let fx = d.track_window(6, TrackOptions { float: true, ..Default::default() });
         assert_eq!(d.entry(6).unwrap().kind, Kind::Floating);
         assert_eq!(placed(&fx)[0].1.center(), (1500, 500));
+    }
+
+    // ----- Enfocar una ventana concreta (lista de apps abiertas, §9.3) -----
+
+    #[test]
+    fn enfocar_una_ventana_de_otro_workspace_cambia_de_workspace_y_la_muestra() {
+        let mut d = one();
+        d.add_window(1);
+        d.switch_workspace(3);
+        d.add_window(2);
+        let fx = d.focus_window(1);
+        assert_eq!(d.active_workspace(), 0);
+        assert!(fx.contains(&Effect::Show(1)) && fx.contains(&Effect::Hide(2)));
+        assert_eq!(fx.last(), Some(&Effect::Focus(1)));
+        assert_eq!(d.focused(), Some(1));
+    }
+
+    #[test]
+    fn enfocar_en_el_workspace_actual_solo_da_el_foco() {
+        let mut d = one();
+        d.add_window(1);
+        d.add_window(2);
+        assert_eq!(d.focus_window(1), vec![Effect::Focus(1)]);
+        assert_eq!(d.focused(), Some(1));
+    }
+
+    #[test]
+    fn enfocar_una_minimizada_la_restaura() {
+        let mut d = one();
+        d.add_window(1);
+        d.add_window(2);
+        d.set_minimized(1, true);
+        let fx = d.focus_window(1);
+        assert!(fx.contains(&Effect::Restore(1)) && fx.last() == Some(&Effect::Focus(1)));
+    }
+
+    #[test]
+    fn enfocar_excluidas_y_desconocidas_solo_da_el_foco() {
+        let mut d = one();
+        d.track_window(9, excluded(Some(0)));
+        assert_eq!(d.focus_window(9), vec![Effect::Focus(9)]);
+        assert_eq!(d.focus_window(404), vec![Effect::Focus(404)]);
     }
 }

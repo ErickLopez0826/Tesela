@@ -1,0 +1,16 @@
+html, body { height: 100%; margin: 0; }
+body { font: 13px/1.35 "Segoe UI", system-ui, sans-serif; color: #e6e6e6; background: transparent; }
+#compact { display: none; height: 100%; align-items: center; justify-content: center; gap: 4px; font-size: 12px; opacity: 0.85; }
+#full { display: flex; flex-direction: column; gap: 6px; height: 100%; box-sizing: border-box; padding: 4px; }
+/* En la barra (32 px de alto) solo cabe el contador. */
+@media (max-height: 60px) {
+  #compact { display: flex; }
+  #full { display: none; }
+}
+#items { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 3px; }
+.entry { text-align: left; font: inherit; color: inherit; background: #1d2026; border: 1px solid #2b2f38; border-radius: 6px; padding: 4px 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry:hover { background: #2b2f38; }
+.entry.copied { border-color: #3d6df2; }
+.empty { opacity: 0.6; padding: 6px; }
+#status { font-size: 11px; opacity: 0.6; }
+.error { color: #ff8a80; opacity: 1; }

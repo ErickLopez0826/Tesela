@@ -45,3 +45,13 @@ GlazeWM sigue corriendo y ya registra `alt+h`, `alt+1`, etc. Dos programas no pu
 - **Instalar** pide una carpeta escrita a mano (no hay selector de carpetas nativo ni formato empaquetado `.zip`); añadirlo es trivial pero requiere decidir formato y una dependencia nueva.
 - **Eventos de red** (`cambio de red`, §10.4) y `enviar mensaje a un canal` no existen todavía: el segundo es del módulo de pareja (Fase 9).
 - Los módulos **no se instalan automáticamente en la barra**: `ui.bar` solo aparece si el módulo lo declara.
+
+## B-9 Pendientes de la Fase 8
+- **CLI de Ookla no instalado** (no instalo software sin tu aprobación). Hasta entonces la prueba de velocidad devuelve datos de EJEMPLO marcados como simulados. Para medir de verdad ejecuta tú, en una terminal:
+  `winget install Ookla.Speedtest.CLI`
+  (la primera ejecución del CLI pide aceptar la licencia; la app ya pasa `--accept-license --accept-gdpr`). Después reinicia la app: la detecta sola en el PATH. El análisis de su salida está probado con una salida de ejemplo del formato documentado, pero **no con una medición real**.
+- **Portapapeles real sin probar de extremo a extremo**: por privacidad la prueba usa un texto fijo. La lectura real del portapapeles está verificada (no falla) pero no escribí en él; hay una prueba manual con restauración (`cargo test -- --ignored escribir_y_leer_con_restauracion`).
+- **Abrir/fijar apps con `apps.launch` real**: probado con adaptadores falsos (validación y llamadas) y la lista y el enfoque con ventanas reales; no abrí ningún programa de verdad.
+- **Historial del portapapeles en texto plano** (D-59): si copias contraseñas desde algo que no las marca como privadas, quedarían en `module-data\clipboard\historial.json`. Propuesta: opción de cifrado o desactivarlo por aplicación de origen.
+- **Notas**: el Markdown es básico (títulos, negrita, cursiva, código, listas, bloques); no hay tablas, enlaces ni imágenes (a propósito, para que renderizar una nota no pueda ejecutar nada).
+- Los módulos se instalan indicando una carpeta escrita; como no vienen preinstalados, la primera vez hay que instalarlos a mano desde `modules\`.

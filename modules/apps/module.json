@@ -1,0 +1,12 @@
+{
+  "id": "apps",
+  "name": "Apps abiertas y fijadas",
+  "version": "1.0.0",
+  "author": "Erick",
+  "description": "Dos listas intercambiables: las apps que tienes abiertas ahora (para saltar a ellas) y las que fijaste (para abrirlas).",
+  "min_core_version": "0.1.0",
+  "permissions": ["windows", "launch", "files"],
+  "entry": "index.html",
+  "ui": { "panel": { "title": "Apps", "height": 340 } },
+  "actions": [{ "id": "alternar", "title": "Abiertas / Fijadas" }]
+}

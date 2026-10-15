@@ -21,6 +21,8 @@ pub enum Message {
     Minimized(WindowId),
     Restored(WindowId),
     MoveEnded(WindowId),
+    /// Pedido (p. ej. desde el módulo de apps): enfocar una ventana, cambiando de workspace si hace falta.
+    FocusWindow(WindowId),
     /// Acción disparada por un atajo o por la interfaz.
     Action(Action),
     /// Atajo de emergencia: pausa y restaura; una segunda vez reanuda.
@@ -336,6 +338,10 @@ impl<P: WindowPlatform> Controller<P> {
             }
             Message::MoveEnded(_) => {
                 let fx = self.desk.relayout();
+                self.run(fx);
+            }
+            Message::FocusWindow(id) => {
+                let fx = self.desk.focus_window(id);
                 self.run(fx);
             }
             Message::Action(a) => self.run_action(a),
@@ -1017,5 +1023,15 @@ mod tests {
         let mut c = ctl_cfg(1, &cfg);
         assert!(press(&mut c, "alt+b"));
         assert_eq!(c.platform().panel_log, vec![0]);
+    }
+
+    #[test]
+    fn el_mensaje_de_enfocar_ventana_llega_a_la_plataforma() {
+        let mut c = ctl_with(2);
+        act(&mut c, Action::FocusWorkspace(4));
+        c.handle(Message::FocusWindow(1));
+        assert_eq!(c.desktop().active_workspace(), 0);
+        assert_eq!(c.platform().focus_log.last(), Some(&1));
+        assert!(!c.platform().windows[&1].hidden);
     }
 }

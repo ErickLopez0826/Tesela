@@ -215,3 +215,18 @@ pub unsafe fn exe_name(pid: u32) -> String {
     let path = String::from_utf16_lossy(&buf[..len as usize]);
     Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
+
+/// Ruta completa del ejecutable del proceso dueño de la ventana (para fijar y abrir apps).
+pub fn exe_path_of(id: isize) -> Option<String> {
+    unsafe {
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd_from(id), Some(&mut pid));
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buf = [0u16; MAX_PATH as usize * 2];
+        let mut len = buf.len() as u32;
+        let result = QueryFullProcessImageNameW(process, PROCESS_NAME_FORMAT(0), PWSTR(buf.as_mut_ptr()), &mut len);
+        let _ = CloseHandle(process);
+        result.ok()?;
+        Some(String::from_utf16_lossy(&buf[..len as usize]))
+    }
+}

@@ -87,3 +87,14 @@ Decisiones tomadas durante el desarrollo autónomo. Las marcadas **(por defecto,
 - **D-51 Eventos.** `workspace_changed` y `focus_changed`, solo a los módulos suscritos que siguen teniendo el permiso `windows` en el momento de emitir.
 - **D-52 Sin firma ni catálogo (§10.5).** Se instalan carpetas que el usuario elige; lo que protege es el aislamiento y los permisos, no la confianza en el autor.
 - **D-53 Prueba de extremo a extremo.** `--selftest-module <id>` (solo para pruebas): la ventana principal carga ese módulo, anota lo que pide a la API y escribe un informe en `WM_SELFTEST_OUT`. No hay estado real del escritorio en ese modo: se usa un estado de ejemplo.
+
+## Fase 8 (módulos de utilidad)
+
+- **D-54 Son módulos instalables de verdad.** `notes`, `apps`, `clipboard` y `speedtest` viven en `modules/` con su `module.json` y corren en el iframe aislado de la Fase 7; no tienen código en el núcleo más allá de la API que usan. No vienen preinstalados: se instalan desde la pestaña Módulos.
+- **D-55 Permisos nuevos.** `launch` (abrir programas), `clipboard` y `speedtest`. Se añadieron porque ninguno de los permisos de la Fase 7 describe honestamente lo que hacen. `apps.list_open` y `apps.focus` cuelgan de `windows`.
+- **D-56 Abrir aplicaciones.** `apps.launch` solo acepta rutas absolutas de `.exe` o `.lnk`, sin parámetros, sin `..` y sin caracteres de control: abre una aplicación, no ejecuta comandos. Se abre con `ShellExecute`.
+- **D-57 Apps abiertas.** La lista incluye las ventanas que la propia app oculta por estar en otro workspace. Enfocar una cambia de workspace, la restaura si estaba minimizada y le da el foco (mensaje `FocusWindow` del gestor); sin gestor activo se enfoca directamente.
+- **D-58 Fijadas "en configuración" (§9.3).** Se guardan en `fijadas.json` dentro de la carpeta de datos del módulo (`module-data\apps\`), no en `config.toml`: el módulo no tiene acceso a la configuración del núcleo por diseño.
+- **D-59 Portapapeles y privacidad.** El núcleo no entrega el contenido si quien copió pidió que no entrara en historiales (`ExcludeClipboardContentFromMonitorProcessing` o `CanIncludeInClipboardHistory = 0`, lo que usan los gestores de contraseñas). El módulo ignora textos de más de 5000 caracteres y guarda 50 entradas. La barra y el panel ejecutan el mismo módulo: releen el archivo antes de escribir para no pisarse. **El historial se guarda en texto plano** en `module-data\clipboard\`.
+- **D-60 Prueba de velocidad.** Con `speedtest.exe` en el PATH se usa el CLI de Ookla (`--format=json`); si no, un adaptador simulado devuelve datos de ejemplo marcados como tales. La medición corre en un hilo; el módulo la inicia y consulta el estado cada segundo (el SDK corta las llamadas a los 15 s).
+- **D-61 Pruebas de extremo a extremo.** `--selftest-module` ahora dispara también las acciones que el módulo declara. En ese modo el portapapeles es un texto fijo para no leer ni guardar nunca el real.

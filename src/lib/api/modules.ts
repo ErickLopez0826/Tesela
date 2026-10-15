@@ -1,7 +1,7 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-export type Permission = "windows" | "power" | "network" | "files" | "notifications" | "system";
+export type Permission = "windows" | "power" | "network" | "files" | "notifications" | "system" | "launch" | "clipboard" | "speedtest";
 
 export interface ModuleManifest {
   id: string;

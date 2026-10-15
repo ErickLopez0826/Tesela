@@ -2,6 +2,8 @@
 #![cfg(windows)]
 #![allow(dead_code)]
 
+pub mod e2e;
+
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::channel;

@@ -14,6 +14,7 @@ use crate::application::system::SystemServices;
 use crate::domain::modules::Permission;
 use crate::domain::snapshot::StateSnapshot;
 use crate::domain::system::PowerAction;
+use crate::domain::utility::{is_launchable, MAX_CLIPBOARD_CHARS};
 
 /// Tras tantos fallos seguidos el núcleo desactiva el módulo.
 pub const MAX_CONSECUTIVE_FAILURES: u32 = 3;
@@ -97,7 +98,11 @@ pub fn required_permission(method: &str) -> Result<Option<Permission>, ApiError>
         "system.stats" => Some(Permission::System),
         "power.run" => Some(Permission::Power),
         "notify.show" => Some(Permission::Notifications),
-        "files.read" | "files.write" | "files.list" | "files.delete" => Some(Permission::Files),
+        "files.read" | "files.write" | "files.list" | "files.delete" | "files.dir" => Some(Permission::Files),
+        "apps.list_open" | "apps.focus" => Some(Permission::Windows),
+        "apps.launch" => Some(Permission::Launch),
+        "clipboard.read" | "clipboard.write" => Some(Permission::Clipboard),
+        "speedtest.start" | "speedtest.status" => Some(Permission::Speedtest),
         other => return Err(ApiError::UnknownMethod(format!("no existe el método '{other}'"))),
     })
 }
@@ -220,6 +225,54 @@ impl ModuleApi {
                 Ok(Value::Null)
             }
             "files.write" => self.files_write(module, params),
+            "files.dir" => {
+                let dir = self.host.data_dir(module);
+                let _ = std::fs::create_dir_all(&dir);
+                Ok(json!({ "path": dir.to_string_lossy() }))
+            }
+            "apps.list_open" => {
+                let apps = self.services.apps.lock().map_err(|e| ApiError::Failed(e.to_string()))?.open_apps().map_err(ApiError::Failed)?;
+                Ok(json!(apps
+                    .iter()
+                    .map(|a| json!({ "handle": a.handle, "exe": a.exe, "path": a.path, "title": a.title }))
+                    .collect::<Vec<_>>()))
+            }
+            "apps.focus" => {
+                let handle = params.get("handle").and_then(Value::as_i64).ok_or_else(|| ApiError::BadParams("falta 'handle' (número)".into()))?;
+                self.services.apps.lock().map_err(|e| ApiError::Failed(e.to_string()))?.focus(handle as isize).map_err(ApiError::Failed)?;
+                Ok(Value::Bool(true))
+            }
+            "apps.launch" => {
+                let target = str_param(params, "path")?;
+                // Solo programas y accesos directos con ruta absoluta; nunca comandos ni parámetros.
+                is_launchable(target).map_err(ApiError::BadParams)?;
+                self.services.apps.lock().map_err(|e| ApiError::Failed(e.to_string()))?.launch(target.trim()).map_err(ApiError::Failed)?;
+                Ok(Value::Bool(true))
+            }
+            "clipboard.read" => {
+                let text = self.services.clipboard.lock().map_err(|e| ApiError::Failed(e.to_string()))?.read_text().map_err(ApiError::Failed)?;
+                Ok(match text {
+                    Some(t) => json!({ "text": t.chars().take(MAX_CLIPBOARD_CHARS).collect::<String>() }),
+                    None => Value::Null,
+                })
+            }
+            "clipboard.write" => {
+                let text = str_param(params, "text")?;
+                if text.chars().count() > MAX_CLIPBOARD_CHARS {
+                    return Err(ApiError::BadParams(format!("el texto supera {MAX_CLIPBOARD_CHARS} caracteres")));
+                }
+                self.services.clipboard.lock().map_err(|e| ApiError::Failed(e.to_string()))?.write_text(text).map_err(ApiError::Failed)?;
+                Ok(Value::Bool(true))
+            }
+            "speedtest.start" => {
+                // Pedirla dos veces a la vez no es un fallo del módulo.
+                self.services.speedtest.lock().map_err(|e| ApiError::Failed(e.to_string()))?.start().map_err(ApiError::BadParams)?;
+                Ok(Value::Bool(true))
+            }
+            "speedtest.status" => {
+                let s = self.services.speedtest.lock().map_err(|e| ApiError::Failed(e.to_string()))?.status();
+                serde_json::to_value(s).map_err(|e| ApiError::Failed(e.to_string()))
+            }
             "files.read" => {
                 let path = self.host.resolve_data_path(module, str_param(params, "path")?).map_err(ApiError::BadParams)?;
                 match std::fs::read_to_string(&path) {
@@ -436,11 +489,63 @@ pub mod fakes {
         }
     }
 
+    pub struct FakeClipboard(pub Calls);
+    impl crate::application::system::ClipboardControl for FakeClipboard {
+        fn read_text(&mut self) -> Result<Option<String>, String> {
+            self.0.log("clip:read");
+            Ok(Some("texto copiado".into()))
+        }
+        fn write_text(&mut self, t: &str) -> Result<(), String> {
+            self.0.log(format!("clip:write:{t}"));
+            Ok(())
+        }
+    }
+
+    pub struct FakeApps(pub Calls);
+    impl crate::application::system::AppsControl for FakeApps {
+        fn open_apps(&mut self) -> Result<Vec<crate::domain::utility::OpenApp>, String> {
+            Ok(vec![crate::domain::utility::OpenApp {
+                handle: 42,
+                exe: "code.exe".into(),
+                path: "C:\\Apps\\code.exe".into(),
+                title: "Editor".into(),
+            }])
+        }
+        fn focus(&mut self, h: isize) -> Result<(), String> {
+            self.0.log(format!("focus:{h}"));
+            Ok(())
+        }
+        fn launch(&mut self, t: &str) -> Result<(), String> {
+            self.0.log(format!("launch:{t}"));
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    pub struct FakeSpeed(Option<bool>);
+    impl crate::application::system::SpeedTestControl for FakeSpeed {
+        fn start(&mut self) -> Result<(), String> {
+            if self.0 == Some(true) {
+                return Err("ya hay una prueba en curso".into());
+            }
+            self.0 = Some(true);
+            Ok(())
+        }
+        fn status(&mut self) -> crate::domain::utility::SpeedStatus {
+            match self.0 {
+                None => crate::domain::utility::SpeedStatus::Idle,
+                Some(_) => crate::domain::utility::SpeedStatus::Running,
+            }
+        }
+    }
+
     pub struct Rig {
         pub api: ModuleApi,
         pub host: Arc<FakeHost>,
         pub state: Arc<FakeState>,
         pub power_calls: Calls,
+        pub clip_calls: Calls,
+        pub app_calls: Calls,
         pub notices: Arc<Mutex<Vec<(String, String)>>>,
     }
 
@@ -490,6 +595,8 @@ pub mod fakes {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let power_calls = Calls::default();
+        let clip_calls = Calls::default();
+        let app_calls = Calls::default();
         let services = Arc::new(SystemServices {
             media: Mutex::new(Box::new(NoMedia)),
             // El adaptador real de energía está detrás del modo seguro, como en producción.
@@ -498,6 +605,9 @@ pub mod fakes {
             wallpaper: Mutex::new(Box::new(NoWall)),
             volume: Mutex::new(Box::new(NoVol)),
             overview: Mutex::new(overview),
+            clipboard: Mutex::new(Box::new(FakeClipboard(clip_calls.clone()))),
+            apps: Mutex::new(Box::new(FakeApps(app_calls.clone()))),
+            speedtest: Mutex::new(Box::new(FakeSpeed::default())),
         });
         let host = FakeHost::new(dir);
         let state = Arc::new(FakeState(Mutex::new(Some(snapshot(1, Some("Editor"))))));
@@ -510,7 +620,7 @@ pub mod fakes {
             Arc::new(move |m, t| n2.lock().unwrap().push((m.to_string(), t.to_string()))),
             "0.1.0",
         );
-        Rig { api, host, state, power_calls, notices }
+        Rig { api, host, state, power_calls, clip_calls, app_calls, notices }
     }
 }
 
@@ -712,5 +822,86 @@ mod tests {
             assert_eq!(r.api.call("m", "files.read", json!({})).unwrap_err().code(), "bad_params");
         }
         assert!(r.host.is_enabled("m"));
+    }
+
+    // ---------- Fase 8: utilidades ----------
+
+    #[test]
+    fn las_funciones_de_utilidad_exigen_su_permiso() {
+        let r = rig_ok("util-denied");
+        r.host.grant("m", &[Permission::Notifications]);
+        for (method, params) in [
+            ("files.dir", json!(null)),
+            ("apps.list_open", json!(null)),
+            ("apps.focus", json!({"handle": 1})),
+            ("apps.launch", json!({"path": "C:\\Apps\\code.exe"})),
+            ("clipboard.read", json!(null)),
+            ("clipboard.write", json!({"text": "x"})),
+            ("speedtest.start", json!(null)),
+            ("speedtest.status", json!(null)),
+        ] {
+            assert_eq!(r.api.call("m", method, params).unwrap_err().code(), "permission_denied", "{method}");
+        }
+        assert!(r.clip_calls.all().is_empty() && r.app_calls.all().is_empty(), "ningún adaptador se tocó");
+    }
+
+    #[test]
+    fn apps_abiertas_y_enfocar_usan_el_permiso_de_ventanas() {
+        let r = rig_ok("apps");
+        r.host.grant("m", &[Permission::Windows]);
+        let list = r.api.call("m", "apps.list_open", json!(null)).unwrap();
+        assert_eq!(list[0]["exe"], "code.exe");
+        assert_eq!(list[0]["handle"], 42);
+        r.api.call("m", "apps.focus", json!({"handle": 42})).unwrap();
+        assert_eq!(r.app_calls.all(), vec!["focus:42"]);
+        assert_eq!(r.api.call("m", "apps.focus", json!({})).unwrap_err().code(), "bad_params");
+        // Con solo `windows` no se puede abrir nada.
+        assert_eq!(r.api.call("m", "apps.launch", json!({"path": "C:\\Apps\\code.exe"})).unwrap_err().code(), "permission_denied");
+    }
+
+    #[test]
+    fn abrir_apps_solo_programas_con_ruta_absoluta() {
+        let r = rig_ok("launch");
+        r.host.grant("m", &[Permission::Launch]);
+        r.api.call("m", "apps.launch", json!({"path": "  C:\\Program Files\\Discord\\Discord.exe "})).unwrap();
+        assert_eq!(r.app_calls.all(), vec!["launch:C:\\Program Files\\Discord\\Discord.exe"]);
+        for bad in ["cmd.exe", "C:\\a\\x.bat", "C:\\a\\..\\b.exe", "C:\\a\\x.exe /c calc", "powershell -c calc", ""] {
+            assert_eq!(r.api.call("m", "apps.launch", json!({"path": bad})).unwrap_err().code(), "bad_params", "'{bad}'");
+        }
+        assert_eq!(r.app_calls.all().len(), 1, "lo rechazado nunca llegó al sistema");
+    }
+
+    #[test]
+    fn portapapeles_leer_y_escribir() {
+        let r = rig_ok("clip");
+        r.host.grant("m", &[Permission::Clipboard]);
+        assert_eq!(r.api.call("m", "clipboard.read", json!(null)).unwrap(), json!({"text": "texto copiado"}));
+        r.api.call("m", "clipboard.write", json!({"text": "hola"})).unwrap();
+        assert_eq!(r.clip_calls.all(), vec!["clip:read", "clip:write:hola"]);
+        let big = "x".repeat(MAX_CLIPBOARD_CHARS + 1);
+        assert_eq!(r.api.call("m", "clipboard.write", json!({"text": big})).unwrap_err().code(), "bad_params");
+    }
+
+    #[test]
+    fn prueba_de_velocidad_se_inicia_y_se_consulta() {
+        let r = rig_ok("speed");
+        r.host.grant("m", &[Permission::Speedtest]);
+        assert_eq!(r.api.call("m", "speedtest.status", json!(null)).unwrap(), json!({"state": "idle"}));
+        r.api.call("m", "speedtest.start", json!(null)).unwrap();
+        assert_eq!(r.api.call("m", "speedtest.status", json!(null)).unwrap(), json!({"state": "running"}));
+        // Pedirla de nuevo mientras corre no es un fallo del módulo.
+        for _ in 0..(MAX_CONSECUTIVE_FAILURES + 1) {
+            assert_eq!(r.api.call("m", "speedtest.start", json!(null)).unwrap_err().code(), "bad_params");
+        }
+        assert!(r.host.is_enabled("m"));
+    }
+
+    #[test]
+    fn la_carpeta_de_datos_del_modulo_se_puede_consultar() {
+        let r = rig_ok("dir");
+        r.host.grant("m", &[Permission::Files]);
+        let p = r.api.call("m", "files.dir", json!(null)).unwrap();
+        assert!(p["path"].as_str().unwrap().ends_with('m'), "{p}");
+        assert!(std::path::Path::new(p["path"].as_str().unwrap()).is_dir());
     }
 }

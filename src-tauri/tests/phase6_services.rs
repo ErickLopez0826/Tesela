@@ -11,7 +11,7 @@ use window_manager_lib::infrastructure::windows::system::build_services;
 #[test]
 #[ignore]
 fn todas_las_acciones_del_panel_responden_y_lo_disruptivo_se_simula() {
-    let services = build_services(false);
+    let services = build_services(false, std::sync::Arc::default());
 
     // Estadísticas (lectura real).
     std::thread::sleep(std::time::Duration::from_secs(3));

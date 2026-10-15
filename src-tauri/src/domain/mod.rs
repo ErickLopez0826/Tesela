@@ -12,4 +12,5 @@ pub mod rules;
 pub mod shortcuts;
 pub mod snapshot;
 pub mod system;
+pub mod utility;
 pub mod window;

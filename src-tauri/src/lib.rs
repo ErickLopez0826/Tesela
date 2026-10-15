@@ -63,8 +63,18 @@ pub fn run() {
         eprintln!("[wm] {w}");
     }
     let allow_changes = config.system.allow_changes;
+    // El módulo de apps pide enfocar ventanas al gestor; el gestor se conecta a este enlace cuando arranca.
     #[cfg(windows)]
-    let services = std::sync::Arc::new(infrastructure::windows::system::build_services(allow_changes));
+    let focus_sink: infrastructure::windows::system::apps::FocusSink = std::sync::Arc::default();
+    #[cfg(windows)]
+    let services = std::sync::Arc::new(infrastructure::windows::system::build_services(allow_changes, focus_sink.clone()));
+
+    // Prueba de extremo a extremo de módulos: el portapapeles real nunca se lee ni se copia a disco.
+    #[cfg(windows)]
+    if args.selftest_module.is_some() {
+        *services.clipboard.lock().unwrap() =
+            Box::new(application::system::FixedClipboard("texto de prueba del selftest".into()));
+    }
 
     // Módulos instalables (§10): almacén en disco, estado compartido y API del núcleo.
     let modules = std::sync::Arc::new(infrastructure::module_store::ModuleStore::new(
@@ -149,7 +159,7 @@ pub fn run() {
         .setup(move |app| {
             *handle_slot.lock().unwrap() = Some(app.handle().clone());
             #[cfg(windows)]
-            setup_windows(app, &args, &store, config.clone(), warning.clone());
+            setup_windows(app, &args, &store, config.clone(), warning.clone(), &focus_sink);
             let _ = (&app, &args);
             Ok(())
         })
@@ -179,6 +189,7 @@ fn setup_windows(
     store: &std::sync::Arc<infrastructure::exclusion_store::ExclusionStore>,
     config: domain::config::ValidConfig,
     warning: Option<String>,
+    focus_sink: &infrastructure::windows::system::apps::FocusSink,
 ) {
     use std::sync::Arc;
     use tauri::Emitter;
@@ -258,6 +269,11 @@ fn setup_windows(
         ..RuntimeOptions::from_config(scope, config)
     };
     let runtime = Runtime::start_with(options);
+    {
+        let tx = runtime.sender();
+        *focus_sink.lock().unwrap() =
+            Some(Box::new(move |handle| tx.send(application::controller::Message::FocusWindow(handle)).is_ok()));
+    }
     let state = app.state::<interface::commands::AppState>();
     *state.manager.lock().unwrap() = Some(runtime);
 }

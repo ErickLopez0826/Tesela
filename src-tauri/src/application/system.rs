@@ -9,6 +9,7 @@ use std::sync::Mutex;
 use crate::domain::system::{
     ActionOutcome, MediaCommand, MediaInfo, PowerAction, RadioKind, RadioState, SystemOverview, VolumeState,
 };
+use crate::domain::utility::{OpenApp, SpeedStatus};
 
 pub trait MediaControl: Send {
     fn now_playing(&mut self) -> Result<Option<MediaInfo>, String>;
@@ -39,6 +40,43 @@ pub trait VolumeControl: Send {
 
 pub trait OverviewProvider: Send {
     fn read(&mut self) -> SystemOverview;
+}
+
+/// Portapapeles de texto. `read_text` devuelve `None` si está vacío, no es texto o la aplicación que copió
+/// pidió que no se guarde en historiales (gestores de contraseñas).
+pub trait ClipboardControl: Send {
+    fn read_text(&mut self) -> Result<Option<String>, String>;
+    fn write_text(&mut self, text: &str) -> Result<(), String>;
+}
+
+/// Portapapeles de mentira con un texto fijo: lo usa la prueba de extremo a extremo (`--selftest-module`) para no
+/// leer ni guardar nunca el portapapeles real de la persona que ejecuta las pruebas.
+pub struct FixedClipboard(pub String);
+
+impl ClipboardControl for FixedClipboard {
+    fn read_text(&mut self) -> Result<Option<String>, String> {
+        Ok(Some(self.0.clone()))
+    }
+
+    fn write_text(&mut self, text: &str) -> Result<(), String> {
+        self.0 = text.to_string();
+        Ok(())
+    }
+}
+
+/// Apps abiertas, traer una al frente y abrir programas.
+pub trait AppsControl: Send {
+    fn open_apps(&mut self) -> Result<Vec<OpenApp>, String>;
+    /// Cambia al workspace de la ventana si hace falta y le da el foco.
+    fn focus(&mut self, handle: isize) -> Result<(), String>;
+    /// Abre un programa o acceso directo (la ruta ya está validada por el núcleo).
+    fn launch(&mut self, target: &str) -> Result<(), String>;
+}
+
+/// Prueba de velocidad: se inicia y se consulta (tarda decenas de segundos).
+pub trait SpeedTestControl: Send {
+    fn start(&mut self) -> Result<(), String>;
+    fn status(&mut self) -> SpeedStatus;
 }
 
 /// Envuelve un adaptador: las lecturas pasan, las escrituras disruptivas solo se hacen si `live`.
@@ -123,6 +161,9 @@ pub struct SystemServices {
     pub wallpaper: Mutex<Box<dyn WallpaperControl>>,
     pub volume: Mutex<Box<dyn VolumeControl>>,
     pub overview: Mutex<Box<dyn OverviewProvider>>,
+    pub clipboard: Mutex<Box<dyn ClipboardControl>>,
+    pub apps: Mutex<Box<dyn AppsControl>>,
+    pub speedtest: Mutex<Box<dyn SpeedTestControl>>,
 }
 
 #[cfg(test)]

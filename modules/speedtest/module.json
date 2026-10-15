@@ -1,0 +1,12 @@
+{
+  "id": "speedtest",
+  "name": "Prueba de velocidad",
+  "version": "1.0.0",
+  "author": "Erick",
+  "description": "Mide la velocidad de tu conexión con el CLI oficial de Ookla, en segundo plano, y guarda los últimos resultados.",
+  "min_core_version": "0.1.0",
+  "permissions": ["speedtest", "files"],
+  "entry": "index.html",
+  "ui": { "panel": { "title": "Velocidad", "height": 220 } },
+  "actions": [{ "id": "iniciar", "title": "Medir ahora" }]
+}
