@@ -1,0 +1,21 @@
+/* Estilos compartidos por las secciones del panel desplegable. */
+.section { margin-bottom: 18px; }
+.section h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.6; }
+.meter { height: 8px; border-radius: 4px; background: #2b2f38; overflow: hidden; }
+.meter .fill { height: 100%; background: #3d6df2; transition: width 0.4s; }
+.meter.warn .fill { background: #d9822b; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; }
+.value { margin-top: 4px; opacity: 0.8; font-variant-numeric: tabular-nums; }
+.hint { opacity: 0.6; font-size: 12px; }
+.btn { font: inherit; color: inherit; background: #1d2026; border: 1px solid #2b2f38; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.btn:hover:not(:disabled) { background: #2b2f38; }
+.btn:disabled { opacity: 0.4; cursor: default; }
+.btn.primary { background: #3d6df2; border-color: #3d6df2; color: #fff; }
+.btn.danger { background: #a3302a; border-color: #a3302a; color: #fff; }
+.btn.on { border-color: #3d6df2; background: #24305a; }
+.badge { display: inline-block; padding: 1px 6px; border-radius: 6px; background: #2b2f38; font-size: 11px; }
+.badge.safe { background: #4a3a10; color: #f0c15a; }
+.notice { margin-top: 6px; padding: 6px 8px; border-radius: 6px; background: #1d2026; font-size: 12px; }
+.notice.simulated { border-left: 3px solid #f0c15a; }
+.notice.error { border-left: 3px solid #d9534f; }
+.buttons { display: flex; gap: 6px; flex-wrap: wrap; }

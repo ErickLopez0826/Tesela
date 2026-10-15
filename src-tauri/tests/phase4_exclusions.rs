@@ -13,6 +13,7 @@ use window_manager_lib::domain::geometry::Rect;
 use window_manager_lib::domain::manageable::Scope;
 use window_manager_lib::domain::rules::ExclusionList;
 use window_manager_lib::infrastructure::windows::facts::{list_monitors, primary_work_area, window_rect};
+use window_manager_lib::infrastructure::windows::platform::Callbacks;
 use window_manager_lib::infrastructure::windows::runtime::{Runtime, RuntimeOptions};
 
 #[test]
@@ -34,9 +35,12 @@ fn juego_y_app_excluida_conviven_con_el_gestor() {
     let bar: Arc<Mutex<Vec<(u32, bool)>>> = Arc::default();
     let options = RuntimeOptions {
         exclusions,
-        bar: {
-            let b = bar.clone();
-            Arc::new(move |m, v| b.lock().unwrap().push((m, v)))
+        callbacks: Callbacks {
+            bar: {
+                let b = bar.clone();
+                Arc::new(move |m, v| b.lock().unwrap().push((m, v)))
+            },
+            ..Callbacks::silent()
         },
         ..RuntimeOptions::basic(Scope::TitlePrefix("WMTEST".into()))
     };

@@ -12,7 +12,7 @@ use crate::infrastructure::windows::facts::list_monitors;
 
 /// Alto de la barra en píxeles lógicos (se escala con el DPI de cada monitor).
 pub const BAR_HEIGHT: f64 = 40.0;
-const PANEL_SIZE: (f64, f64) = (380.0, 560.0);
+const PANEL_SIZE: (f64, f64) = (420.0, 780.0);
 const PANEL_MARGIN: f64 = 12.0;
 const PANEL_LABEL: &str = "panel";
 
@@ -87,11 +87,14 @@ pub fn undock_all(app: &AppHandle) {
 
 /// Abre o cierra el panel desplegable en el monitor indicado (§9.2).
 pub fn toggle_panel(app: &AppHandle, monitor: u32) {
+    // Crear una ventana desde el hilo principal bloquea el bucle de eventos (el webview necesita ese
+    // mismo hilo para terminar de crearse), así que se hace desde un hilo aparte.
     let handle = app.clone();
-    let _ = app.run_on_main_thread(move || toggle_panel_on_main(&handle, monitor));
+    let _ = std::thread::Builder::new().name("wm-panel".into()).spawn(move || toggle_panel_inner(&handle, monitor));
 }
 
-fn toggle_panel_on_main(app: &AppHandle, monitor: u32) {
+fn toggle_panel_inner(app: &AppHandle, monitor: u32) {
+    eprintln!("[wm] alternar panel en el monitor {monitor}");
     let existing = app.get_webview_window(PANEL_LABEL);
     if let Some(w) = &existing {
         if w.is_visible().unwrap_or(false) {
@@ -122,9 +125,13 @@ fn toggle_panel_on_main(app: &AppHandle, monitor: u32) {
                 .build();
             match built {
                 Ok(w) => {
+                    if let Some(h) = hwnd_of(&w) {
+                        appbar::make_tool_window(h);
+                    }
                     let w2 = w.clone();
                     w.on_window_event(move |ev| {
                         if let WindowEvent::Focused(false) = ev {
+                            eprintln!("[wm] el panel perdió el foco: se oculta");
                             let _ = w2.hide();
                             *PANEL_HID_AT.lock().unwrap() = Some(Instant::now());
                         }

@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StateSnapshot } from "../api/state";
 import BarView from "./BarView.svelte";
-import PanelView from "./PanelView.svelte";
 
 afterEach(cleanup);
 
@@ -56,28 +55,24 @@ describe("BarView", () => {
   });
 });
 
-describe("PanelView", () => {
-  it("muestra reloj, CPU, RAM y los 9 workspaces", () => {
-    const all = Array.from({ length: 9 }, (_, i) => ({ number: i + 1, monitor: 1, visible: i === 0, active: i === 0, window_count: i }));
-    render(PanelView, { state: { ...state, workspaces: all }, stats, now, onWorkspace: vi.fn(), onClose: vi.fn() });
-    expect(screen.getByText("09:05:07")).toBeTruthy();
-    expect(screen.getByText("37%")).toBeTruthy();
-    expect(screen.getByText("8.0 GB de 16.0 GB")).toBeTruthy();
-    expect(screen.getAllByRole("button")).toHaveLength(9);
-  });
-
-  it("cambia de workspace y se cierra con Escape", async () => {
-    const onWorkspace = vi.fn();
-    const onClose = vi.fn();
-    render(PanelView, { state, stats, now, onWorkspace, onClose });
-    await fireEvent.click(screen.getByText("3").closest("button")!);
-    expect(onWorkspace).toHaveBeenCalledWith(3);
-    await fireEvent.keyDown(window, { key: "Escape" });
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  it("explica que el gestor no está activo", () => {
-    render(PanelView, { state: null, stats: null, now, onWorkspace: vi.fn(), onClose: vi.fn() });
-    expect(screen.getByText("El gestor de ventanas no está activo.")).toBeTruthy();
+describe("BarView: volumen, medios y temperatura", () => {
+  it("muestra lo que suena, el volumen y la temperatura, y silencia con un clic", async () => {
+    const onMute = vi.fn();
+    render(BarView, {
+      monitorId: 1,
+      state,
+      stats,
+      now,
+      volume: { percent: 40, muted: false },
+      media: { title: "Tema", artist: "Banda", app: "Spotify", playing: true },
+      temperature: 61.4,
+      onWorkspace: vi.fn(),
+      onPanel: vi.fn(),
+      onMute,
+    });
+    expect(screen.getByText("♪ Banda – Tema")).toBeTruthy();
+    expect(screen.getByText("61 °C")).toBeTruthy();
+    await fireEvent.click(screen.getByLabelText("Silenciar"));
+    expect(onMute).toHaveBeenCalledWith(true);
   });
 });

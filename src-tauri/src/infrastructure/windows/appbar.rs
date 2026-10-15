@@ -61,3 +61,13 @@ pub fn set_visible(window: isize, visible: bool) {
         let _ = ShowWindow(hwnd_from(window), if visible { SW_SHOWNOACTIVATE } else { SW_HIDE });
     }
 }
+
+/// Marca la ventana como "de herramientas": fuera del Alt+Tab y de la barra de tareas, y los gestores
+/// de ventanas externos (como GlazeWM, que sigue instalado como respaldo) no la colocan en su mosaico.
+pub fn make_tool_window(window: isize) {
+    unsafe {
+        let hwnd = hwnd_from(window);
+        let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+        SetWindowLongW(hwnd, GWL_EXSTYLE, (ex | WS_EX_TOOLWINDOW.0) as i32);
+    }
+}

@@ -15,6 +15,13 @@ vertical_axis = "rows"   # monitores verticales: "rows" por defecto (DECISIONS.m
 float_width = 0.6
 float_height = 0.7
 
+# Módulos de sistema y de acción (panel desplegable).
+[system]
+# false (recomendado al probar): apagar, suspender, reiniciar, hibernar y cambiar Wi-Fi, Bluetooth o
+# compartir red se SIMULAN: el panel los muestra pero no tocan el equipo. Ponlo en true para usarlos de
+# verdad y reinicia la app.
+allow_changes = false
+
 # Workspaces ligados a monitores (0 = el de más a la izquierda).
 [[workspace]]
 name = "1"

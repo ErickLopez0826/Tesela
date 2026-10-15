@@ -12,6 +12,7 @@ use common::*;
 use window_manager_lib::domain::manageable::Scope;
 use window_manager_lib::infrastructure::config_file::{config_path, load_file};
 use window_manager_lib::infrastructure::windows::facts::primary_work_area;
+use window_manager_lib::infrastructure::windows::platform::Callbacks;
 use window_manager_lib::infrastructure::windows::runtime::{Runtime, RuntimeOptions};
 
 fn config_text(extra: &str) -> String {
@@ -64,9 +65,12 @@ fn atajos_modo_redimensionar_recarga_y_salida() {
     let exited = Arc::new(AtomicBool::new(false));
     let options = RuntimeOptions {
         loader: Some(Box::new(load_file)),
-        notice: {
-            let n = notices.clone();
-            Arc::new(move |t: &str| n.lock().unwrap().push(t.to_string()))
+        callbacks: Callbacks {
+            notice: {
+                let n = notices.clone();
+                Arc::new(move |t: &str| n.lock().unwrap().push(t.to_string()))
+            },
+            ..Callbacks::silent()
         },
         on_exit: {
             let e = exited.clone();

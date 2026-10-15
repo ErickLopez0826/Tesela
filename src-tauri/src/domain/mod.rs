@@ -10,4 +10,5 @@ pub mod manageable;
 pub mod rules;
 pub mod shortcuts;
 pub mod snapshot;
+pub mod system;
 pub mod window;

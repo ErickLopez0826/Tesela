@@ -53,9 +53,17 @@ pub fn run() {
     let store = std::sync::Arc::new(infrastructure::exclusion_store::ExclusionStore::load_or_seed(
         infrastructure::exclusion_store::ExclusionStore::default_path(),
     ));
+    // La configuración se lee una sola vez al arrancar: la usan el gestor, los atajos y los módulos de sistema.
+    let (config, warning) = infrastructure::config_file::load_or_create();
+    if let Some(w) = &warning {
+        eprintln!("[wm] {w}");
+    }
+    let allow_changes = config.system.allow_changes;
+    #[cfg(windows)]
+    let services = std::sync::Arc::new(infrastructure::windows::system::build_services(allow_changes));
 
     let app = tauri::Builder::default()
-        .manage(interface::commands::AppState::new(store.clone()))
+        .manage(interface::commands::AppState::new(store.clone(), services.clone(), allow_changes))
         .invoke_handler(tauri::generate_handler![
             interface::commands::list_windows,
             interface::commands::list_exclusions,
@@ -66,10 +74,22 @@ pub fn run() {
             interface::commands::run_action,
             interface::commands::open_panel,
             interface::commands::close_panel,
+            interface::commands::system_mode,
+            interface::commands::overview,
+            interface::commands::media_now,
+            interface::commands::media_command,
+            interface::commands::volume_get,
+            interface::commands::volume_set,
+            interface::commands::volume_mute,
+            interface::commands::radio_states,
+            interface::commands::radio_set,
+            interface::commands::power_run,
+            interface::commands::wallpapers_list,
+            interface::commands::wallpaper_set,
         ])
         .setup(move |app| {
             #[cfg(windows)]
-            setup_windows(app, &args, &store);
+            setup_windows(app, &args, &store, config.clone(), warning.clone());
             let _ = (&app, &args);
             Ok(())
         })
@@ -93,7 +113,13 @@ pub fn run() {
 
 /// Arranque específico de Windows: barras y gestor de ventanas, según los argumentos.
 #[cfg(windows)]
-fn setup_windows(app: &mut tauri::App, args: &CliArgs, store: &std::sync::Arc<infrastructure::exclusion_store::ExclusionStore>) {
+fn setup_windows(
+    app: &mut tauri::App,
+    args: &CliArgs,
+    store: &std::sync::Arc<infrastructure::exclusion_store::ExclusionStore>,
+    config: domain::config::ValidConfig,
+    warning: Option<String>,
+) {
     use std::sync::Arc;
     use tauri::Emitter;
 
@@ -116,9 +142,8 @@ fn setup_windows(app: &mut tauri::App, args: &CliArgs, store: &std::sync::Arc<in
                 // Solo cuenta la geometría real del monitor; el área útil cambia al acoplar nuestras barras.
                 let now = infrastructure::windows::facts::list_monitors();
                 if key(&now) != key(&last) {
-                    let h = watcher.clone();
-                    let monitors = now.clone();
-                    let _ = watcher.run_on_main_thread(move || interface::bar::sync_bars(&h, &monitors));
+                    // Desde este hilo (no el principal): crear ventanas en el principal bloquearía el bucle.
+                    interface::bar::sync_bars(&watcher, &now);
                     last = now;
                 }
             }
@@ -154,9 +179,7 @@ fn setup_windows(app: &mut tauri::App, args: &CliArgs, store: &std::sync::Arc<in
             Arc::new(move |monitor: u32| interface::bar::toggle_panel(&h, monitor))
         },
     };
-    let (config, warning) = infrastructure::config_file::load_or_create();
     if let Some(w) = warning {
-        eprintln!("[wm] {w}");
         (callbacks.notice)(&w);
     }
     let exit_handle = handle.clone();

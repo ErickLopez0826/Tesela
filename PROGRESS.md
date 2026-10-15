@@ -46,3 +46,14 @@ Cómo ejecutar la prueba real: `cargo test --test phase1_windows -- --ignored --
 - ✅ Panel desplegable (clic en ☰ o `alt+b`): reloj, CPU, RAM y los 9 workspaces con clic para cambiar.
 - ✅ Criterio "la barra reserva su espacio y no se encima con las ventanas": `tests/phase5_bar.rs` arranca la app real con tus dos monitores (1920×1080 y 1080×1920 vertical): hay una barra por monitor, el área útil de cada uno quedó por debajo de la barra y las ventanas de prueba gestionadas quedan debajo de ella (y=60 = 40 de barra + 20 de margen). Al cerrar la app el área útil vuelve a la original.
 - 🟡 Contenido de la barra no configurable por zonas todavía (B-6).
+
+## Fase 6: Módulos de sistema y acción 🟡 (lectura verificada con el sistema real; escritura en modo seguro)
+- ✅ Estadísticas (CPU, GPU, RAM, discos, red, tiempo encendido, apps que más consumen): lectura real verificada (`tests/phase6_services.rs`).
+- ✅ Medios: lee lo que suena en Spotify (título, artista, estado) con SMTC; controles anterior/pausa/siguiente implementados.
+- ✅ Volumen: lectura real, ajuste y silencio (probado solo reescribiendo el mismo valor). Barra: volumen, lo que suena y temperatura si existe.
+- ✅ Red: velocidad de bajada/subida (la prueba de velocidad con Ookla es de la Fase 8).
+- ✅ Energía: las cuatro acciones con confirmación en dos pasos. 🟡 **Solo simulada**: modo seguro por defecto (D-39); el adaptador real existe y está probado a nivel de qué comando ejecuta cada acción, pero no se ejecutó.
+- ✅ Wi-Fi, Bluetooth y compartir red: estado real leído (Wi-Fi sí, Bluetooth no, compartir red disponible). 🟡 Cambiarlos solo está simulado en las pruebas.
+- ✅ Fondos con transición: lista de imágenes de la carpeta y aplicación con `IDesktopWallpaper`; solo lectura del fondo actual verificada (B-7).
+- 🟡 Criterio "cada acción del panel funciona desde la interfaz": cada acción tiene su botón, su comando Tauri y su adaptador, y la interfaz está probada con Vitest (47 pruebas); con el sistema real se verificó todo lo que no es disruptivo. Las acciones disruptivas funcionan en modo simulado y quedan para que las confirmes (B-7).
+- Corrección encontrada al arrancar la app real: `sysinfo` inicializaba COM en el hilo principal y tumbaba la app (`RPC_E_CHANGED_MODE`); y las ventanas creadas desde el hilo principal bloqueaban el panel. Ambos corregidos (D-44).

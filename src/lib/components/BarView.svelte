@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { StateSnapshot, SystemStats } from "../api/state";
+  import type { MediaInfo, VolumeState } from "../api/system";
   import { formatClock, formatPercent, ramPercent, workspacesFor } from "../stores/wmState";
 
   let {
@@ -7,18 +8,27 @@
     state,
     stats,
     now,
+    volume = null,
+    media = null,
+    temperature = null,
     onWorkspace,
     onPanel,
+    onMute = () => {},
   }: {
     monitorId: number;
     state: StateSnapshot | null;
     stats: SystemStats | null;
     now: Date;
+    volume?: VolumeState | null;
+    media?: MediaInfo | null;
+    temperature?: number | null;
     onWorkspace: (number: number) => void;
     onPanel: () => void;
+    onMute?: (muted: boolean) => void;
   } = $props();
 
   const workspaces = $derived(workspacesFor(state, monitorId));
+  const mediaText = $derived(media ? [media.artist, media.title].filter(Boolean).join(" – ") : "");
 </script>
 
 <div class="bar">
@@ -37,9 +47,16 @@
   </div>
 
   <div class="zone right">
+    {#if media}<span class="media" title={mediaText}>{media.playing ? "♪" : "⏸"} {mediaText}</span>{/if}
     {#if stats}
       <span class="stat" title="CPU">CPU {formatPercent(stats.cpu_percent)}</span>
       <span class="stat" title="RAM">RAM {formatPercent(ramPercent(stats))}</span>
+    {/if}
+    {#if temperature !== null}<span class="stat" title="Temperatura">{Math.round(temperature)} °C</span>{/if}
+    {#if volume}
+      <button class="stat vol" aria-label={volume.muted ? "Activar sonido" : "Silenciar"} onclick={() => onMute(!volume.muted)}>
+        {volume.muted ? "🔇" : "🔊"} {Math.round(volume.percent)}%
+      </button>
     {/if}
     <span class="clock">{formatClock(now)}</span>
     <button class="panel-btn" aria-label="Abrir panel" onclick={onPanel}>☰</button>
@@ -50,7 +67,7 @@
   :global(html, body) { margin: 0; height: 100%; overflow: hidden; background: #111; }
   .bar {
     display: grid;
-    grid-template-columns: 1fr minmax(0, 2fr) 1fr;
+    grid-template-columns: 1fr minmax(0, 2fr) 1.4fr;
     align-items: center;
     height: 100vh;
     padding: 0 10px;
@@ -72,7 +89,9 @@
   .badge { padding: 2px 6px; border-radius: 6px; background: #2b2f38; font-size: 11px; }
   .badge.warn { background: #7a4b00; }
   .stat { opacity: 0.8; font-variant-numeric: tabular-nums; }
+  .media { max-width: 220px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; opacity: 0.8; }
+  .vol { padding: 2px 4px; }
   .clock { font-weight: 600; font-variant-numeric: tabular-nums; }
   .panel-btn { padding: 2px 8px; font-size: 15px; }
-  .panel-btn:hover, .ws:hover { background: #2b2f38; }
+  .panel-btn:hover, .ws:hover, .vol:hover { background: #2b2f38; }
 </style>

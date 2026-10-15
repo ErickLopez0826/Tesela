@@ -63,10 +63,20 @@ pub struct KeybindingConfig {
     pub mode: Option<String>,
 }
 
+/// Ajustes de los módulos de sistema y de acción.
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+#[serde(deny_unknown_fields, default)]
+pub struct SystemConfig {
+    /// Si es `false` (por defecto), apagar/suspender/reiniciar/hibernar y cambiar Wi-Fi/Bluetooth/compartir
+    /// red se simulan. Cambiarlo requiere reiniciar la app.
+    pub allow_changes: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     pub layout: LayoutConfig,
+    pub system: SystemConfig,
     #[serde(rename = "workspace")]
     pub workspaces: Vec<WorkspaceConfig>,
     #[serde(rename = "keybinding")]
@@ -92,6 +102,7 @@ pub struct ValidConfig {
     pub settings: Settings,
     pub keymap: Keymap,
     pub rules: Vec<WindowRule>,
+    pub system: SystemConfig,
 }
 
 impl Config {
@@ -168,6 +179,7 @@ impl Config {
                 },
                 keymap,
                 rules: self.window_rules.clone(),
+                system: self.system.clone(),
             }),
             _ => Err(errors),
         }
