@@ -1,7 +1,7 @@
 //! Hilos de ejecución del gestor: bucle de mensajes de Windows (hooks y atajos)
 //! y el hilo del controlador que decide y aplica.
 
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::Mutex;
 use std::thread::{self, JoinHandle};
 
@@ -131,7 +131,13 @@ fn controller_loop(rx: Receiver<Message>, scope: Scope) {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut controller = Controller::new(Win32Platform::new(), scope);
         let guard = RestoreOnPanic(&mut controller);
-        while let Ok(msg) = rx.recv() {
+        loop {
+            // Cada 2 s se revisan los monitores (conectar/desconectar).
+            let msg = match rx.recv_timeout(std::time::Duration::from_secs(2)) {
+                Ok(m) => m,
+                Err(RecvTimeoutError::Timeout) => Message::Tick,
+                Err(RecvTimeoutError::Disconnected) => break,
+            };
             if !guard.0.handle(msg) {
                 break;
             }

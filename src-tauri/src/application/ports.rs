@@ -1,5 +1,5 @@
+use crate::domain::desktop::Monitor;
 use crate::domain::effects::{Effect, WindowId};
-use crate::domain::geometry::Rect;
 use crate::domain::manageable::WindowFacts;
 use crate::domain::window::WindowCandidate;
 
@@ -14,8 +14,8 @@ pub trait WindowPlatform {
     fn facts(&self, id: WindowId) -> Option<WindowFacts>;
     /// Ventanas de nivel superior existentes (para adoptarlas al arrancar).
     fn top_level_windows(&self) -> Vec<WindowId>;
-    /// Área útil del monitor principal.
-    fn work_area(&self) -> Rect;
+    /// Monitores conectados, ordenados de izquierda a derecha y de arriba abajo.
+    fn monitors(&self) -> Vec<Monitor>;
     fn apply(&mut self, effect: &Effect) -> Result<(), String>;
     /// Olvida lo recordado de una ventana que ya no se gestiona (sin tocarla).
     fn forget(&mut self, id: WindowId);

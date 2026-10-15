@@ -25,3 +25,13 @@ Decisiones tomadas durante el desarrollo autónomo. Las marcadas **(por defecto,
 ## Configuración (sección 8)
 
 - **D-9 Formato.** TOML (`serde` + `toml`) para atajos y ajustes. Los atajos de referencia se tomaron de la sección 8 del plan.
+
+## Fase 2 (layout y monitores)
+
+- **D-10 Redimensionar en el eje del apilado.** Si la ventana comparte grupo con otras y el eje pedido coincide con el del apilado, se redimensiona dentro del grupo; si no, se redimensiona la columna (eje principal). Con apilado horizontal en un eje de columnas, el ancho del grupo solo cambia cuando la ventana está sola.
+- **D-11 Mover ventana.** Al mover a lo largo del apilado se reordena; al llegar al borde del apilado (o en la dirección del eje principal) la ventana pasa al grupo vecino (queda apilada con él). Si no hay grupo vecino y la ventana comparte grupo, sale a una columna nueva; si está sola, intenta pasar al monitor vecino.
+- **D-12 Flotantes.** Siempre se centran al hacerse flotantes, con el 60 % × 70 % del área útil (`float_size`), porque el dominio no conoce el tamaño previo de la ventana.
+- **D-13 Workspaces y monitores.** `bindings` liga un workspace a un monitor por posición en la lista (izquierda→derecha). Un workspace sin ligar se abre en el monitor donde estás. Cada monitor tiene exactamente un workspace visible. Los valores por defecto del código no ligan ninguno; la ligadura real saldrá de la configuración (Fase 3), basada en `~/.glzr/glazewm/config.yaml` (solo lectura): 1-4 → monitor 0, 5-7 → monitor 1, 8-9 libres.
+- **D-14 Desconectar un monitor.** Sus workspaces pasan al principal (ocultos). Si el workspace estaba visible, sus ventanas se funden en el workspace visible del principal para que no queden ocultas. Al reconectar, los workspaces ligados vuelven a su monitor si estaban ocultos.
+- **D-15 Ventanas de prueba.** El script de pruebas se ejecuta con una copia de `powershell.exe` llamada `Lively.exe` para que las reglas `ignore` de GlazeWM (proceso Lively + clase HwndWrapper) no hagan que ambos gestores se peleen por ellas. No se toca la configuración de GlazeWM.
+- **D-16 Minimizar.** `alt+m` minimiza la ventana enfocada; si no hay enfocada, restaura la última minimizada. Una ventana minimizada sale del layout y vuelve a su columna al restaurarse.

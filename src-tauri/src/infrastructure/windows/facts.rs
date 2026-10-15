@@ -6,7 +6,8 @@ use windows::core::{BOOL, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, MAX_PATH, RECT};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS};
 use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
+    EnumDisplayMonitors, GetMonitorInfoW, MonitorFromWindow, HDC, HMONITOR, MONITORINFO,
+    MONITOR_DEFAULTTOPRIMARY,
 };
 use windows::Win32::System::Threading::{
     GetCurrentProcessId, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
@@ -15,9 +16,10 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetClassNameW, GetDesktopWindow, GetParent, GetWindow, GetWindowLongW, GetWindowRect,
     GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, GWL_EXSTYLE,
-    GW_OWNER, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    GW_OWNER, MONITORINFOF_PRIMARY, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
+use crate::domain::desktop::Monitor;
 use crate::domain::geometry::Rect;
 use crate::domain::manageable::WindowFacts;
 
@@ -74,6 +76,28 @@ pub fn primary_work_area() -> Rect {
         let desktop = GetDesktopWindow();
         monitor_rects(id_of(desktop)).map(|(_, work)| work).unwrap_or(Rect::new(0, 0, 1920, 1040))
     }
+}
+
+/// Monitores conectados, de izquierda a derecha y de arriba abajo.
+pub fn list_monitors() -> Vec<Monitor> {
+    unsafe extern "system" fn collect(mon: HMONITOR, _dc: HDC, _rc: *mut RECT, lparam: LPARAM) -> BOOL {
+        let v = &mut *(lparam.0 as *mut Vec<Monitor>);
+        let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if GetMonitorInfoW(mon, &mut info).as_bool() {
+            v.push(Monitor {
+                id: mon.0 as usize as u32,
+                work_area: to_rect(info.rcWork),
+                primary: info.dwFlags & MONITORINFOF_PRIMARY != 0,
+            });
+        }
+        BOOL(1)
+    }
+    let mut v: Vec<Monitor> = Vec::new();
+    unsafe {
+        let _ = EnumDisplayMonitors(None, None, Some(collect), LPARAM(&mut v as *mut _ as isize));
+    }
+    v.sort_by_key(|m| (m.work_area.x, m.work_area.y));
+    v
 }
 
 pub fn facts_of(id: isize) -> Option<WindowFacts> {

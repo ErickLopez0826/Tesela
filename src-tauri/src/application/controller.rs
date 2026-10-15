@@ -1,7 +1,8 @@
 //! Controlador: traduce eventos y comandos en cambios del `Desktop` y los aplica a la plataforma.
 
 use crate::application::ports::WindowPlatform;
-use crate::domain::desktop::Desktop;
+use crate::domain::actions::Action;
+use crate::domain::desktop::{Desktop, Settings};
 use crate::domain::effects::{Effect, WindowId};
 use crate::domain::manageable::{is_manageable, Scope};
 
@@ -13,11 +14,12 @@ pub enum Message {
     Minimized(WindowId),
     Restored(WindowId),
     MoveEnded(WindowId),
-    SwitchWorkspace(usize),
-    MoveToWorkspace { ws: usize, follow: bool },
-    FocusNext,
+    /// Acción disparada por un atajo o por la interfaz.
+    Action(Action),
     /// Atajo de emergencia: pausa y restaura; una segunda vez reanuda.
     Emergency,
+    /// Revisión periódica (cambios de monitores).
+    Tick,
     /// Cierre de la app: restaura y deja de gestionar.
     Shutdown,
 }
@@ -26,13 +28,18 @@ pub struct Controller<P: WindowPlatform> {
     desk: Desktop,
     platform: P,
     scope: Scope,
+    settings: Settings,
     paused: bool,
 }
 
 impl<P: WindowPlatform> Controller<P> {
     pub fn new(platform: P, scope: Scope) -> Self {
-        let desk = Desktop::new(platform.work_area());
-        let mut c = Controller { desk, platform, scope, paused: false };
+        Self::with_settings(platform, scope, Settings::default())
+    }
+
+    pub fn with_settings(platform: P, scope: Scope, settings: Settings) -> Self {
+        let desk = Desktop::new(settings.clone(), platform.monitors());
+        let mut c = Controller { desk, platform, scope, settings, paused: false };
         c.adopt_existing();
         c
     }
@@ -56,6 +63,9 @@ impl<P: WindowPlatform> Controller<P> {
     }
 
     fn try_add(&mut self, id: WindowId) {
+        if self.desk.entry(id).is_some() {
+            return;
+        }
         let Some(facts) = self.platform.facts(id) else { return };
         if facts.minimized || !is_manageable(&facts, &self.scope) {
             return;
@@ -72,13 +82,21 @@ impl<P: WindowPlatform> Controller<P> {
         }
     }
 
+    fn check_monitors(&mut self) {
+        let current = self.platform.monitors();
+        if current != self.desk.monitors() {
+            let fx = self.desk.set_monitors(current);
+            self.run(fx);
+        }
+    }
+
     /// Procesa un mensaje. Devuelve `false` cuando el controlador debe terminar.
     pub fn handle(&mut self, msg: Message) -> bool {
         match msg {
             Message::Emergency => {
                 if self.paused {
                     self.paused = false;
-                    self.desk = Desktop::new(self.platform.work_area());
+                    self.desk = Desktop::new(self.settings.clone(), self.platform.monitors());
                     self.adopt_existing();
                 } else {
                     self.paused = true;
@@ -98,29 +116,26 @@ impl<P: WindowPlatform> Controller<P> {
             }
             Message::Focused(id) => self.desk.note_focus(id),
             Message::Minimized(id) => {
-                let fx = self.desk.remove_window(id);
-                self.platform.forget(id);
+                let fx = self.desk.set_minimized(id, true);
                 self.run(fx);
             }
-            Message::Restored(id) => self.try_add(id),
-            Message::MoveEnded(id) => {
-                if self.desk.workspace_of(id) == Some(self.desk.active_workspace()) {
-                    let fx = self.desk.set_area(self.platform.work_area());
+            Message::Restored(id) => {
+                if self.desk.entry(id).is_some() {
+                    let fx = self.desk.set_minimized(id, false);
                     self.run(fx);
+                } else {
+                    self.try_add(id);
                 }
             }
-            Message::SwitchWorkspace(ws) => {
-                let fx = self.desk.switch_workspace(ws);
+            Message::MoveEnded(_) => {
+                let fx = self.desk.relayout();
                 self.run(fx);
             }
-            Message::MoveToWorkspace { ws, follow } => {
-                let fx = self.desk.move_focused_to(ws, follow);
+            Message::Action(a) => {
+                let fx = self.desk.apply_action(&a);
                 self.run(fx);
             }
-            Message::FocusNext => {
-                let fx = self.desk.focus_next();
-                self.run(fx);
-            }
+            Message::Tick => self.check_monitors(),
         }
         true
     }
@@ -129,6 +144,8 @@ impl<P: WindowPlatform> Controller<P> {
 #[cfg(test)]
 pub mod fake {
     use super::*;
+    use crate::application::ports::WindowPlatform;
+    use crate::domain::desktop::Monitor;
     use crate::domain::geometry::Rect;
     use crate::domain::manageable::WindowFacts;
     use std::collections::HashMap;
@@ -143,13 +160,16 @@ pub mod fake {
     }
 
     pub struct FakePlatform {
-        pub area: Rect,
+        pub monitors: Vec<Monitor>,
         pub windows: HashMap<WindowId, FakeWindow>,
     }
 
     impl FakePlatform {
         pub fn new() -> Self {
-            FakePlatform { area: Rect::new(0, 0, 1000, 600), windows: HashMap::new() }
+            FakePlatform {
+                monitors: vec![Monitor { id: 0, work_area: Rect::new(0, 0, 1000, 600), primary: true }],
+                windows: HashMap::new(),
+            }
         }
 
         pub fn spawn(&mut self, id: WindowId, title: &str) {
@@ -186,8 +206,8 @@ pub mod fake {
             v.sort();
             v
         }
-        fn work_area(&self) -> Rect {
-            self.area
+        fn monitors(&self) -> Vec<Monitor> {
+            self.monitors.clone()
         }
         fn apply(&mut self, e: &Effect) -> Result<(), String> {
             match e {
@@ -205,7 +225,7 @@ pub mod fake {
                     w.hidden = true;
                 }
                 Effect::Show(id) => self.windows.get_mut(id).ok_or("no existe")?.hidden = false,
-                Effect::Focus(_) | Effect::Close(_) => {}
+                Effect::Focus(_) | Effect::Close(_) | Effect::Minimize(_) | Effect::Restore(_) => {}
             }
             Ok(())
         }
@@ -223,6 +243,7 @@ pub mod fake {
 mod tests {
     use super::fake::FakePlatform;
     use super::*;
+    use crate::domain::actions::Action;
 
     fn ctl_with(n: isize) -> Controller<FakePlatform> {
         let mut p = FakePlatform::new();
@@ -232,9 +253,13 @@ mod tests {
         Controller::new(p, Scope::TitlePrefix("WMTEST".into()))
     }
 
+    fn act(c: &mut Controller<FakePlatform>, a: Action) {
+        c.handle(Message::Action(a));
+    }
+
     /// Invariante de la Fase 1: ninguna ventana gestionada se pierde ni queda fuera de pantalla.
     fn assert_no_lost_windows(c: &Controller<FakePlatform>) {
-        let area = c.platform().area;
+        let area = c.platform().monitors[0].work_area;
         let active = c.desktop().active_workspace();
         for (id, w) in &c.platform().windows {
             match c.desktop().workspace_of(*id) {
@@ -254,7 +279,7 @@ mod tests {
         p.spawn(1, "WMTEST 1");
         p.spawn(2, "Chrome del usuario");
         let c = Controller::new(p, Scope::TitlePrefix("WMTEST".into()));
-        assert_eq!(c.desktop().windows_in(0), &[1]);
+        assert_eq!(c.desktop().windows_in(0), vec![1]);
         assert!(!c.platform().windows[&2].touched, "no debe tocar ventanas fuera del alcance");
     }
 
@@ -265,26 +290,26 @@ mod tests {
         c.platform.spawn(4, "WMTEST 4");
         c.handle(Message::Opened(4));
         assert_no_lost_windows(&c);
-        c.handle(Message::SwitchWorkspace(1));
+        act(&mut c, Action::FocusWorkspace(2));
         assert_no_lost_windows(&c);
         c.platform.spawn(5, "WMTEST 5");
         c.handle(Message::Opened(5));
-        c.handle(Message::SwitchWorkspace(0));
+        act(&mut c, Action::FocusWorkspace(1));
         assert_no_lost_windows(&c);
         c.platform.destroy(2);
         c.handle(Message::Closed(2));
         assert_no_lost_windows(&c);
-        c.handle(Message::MoveToWorkspace { ws: 2, follow: true });
+        act(&mut c, Action::MoveToWorkspace(3));
         assert_no_lost_windows(&c);
-        c.handle(Message::FocusNext);
+        act(&mut c, Action::CycleFocus);
         assert_no_lost_windows(&c);
     }
 
     #[test]
     fn emergencia_restaura_posiciones_originales() {
         let mut c = ctl_with(3);
-        c.handle(Message::SwitchWorkspace(1));
-        c.handle(Message::SwitchWorkspace(0));
+        act(&mut c, Action::FocusWorkspace(2));
+        act(&mut c, Action::FocusWorkspace(1));
         c.handle(Message::Emergency);
         assert!(c.is_paused());
         for w in c.platform().windows.values() {
@@ -300,7 +325,7 @@ mod tests {
     #[test]
     fn emergencia_con_ventanas_en_otro_workspace_las_muestra() {
         let mut c = ctl_with(2);
-        c.handle(Message::SwitchWorkspace(3));
+        act(&mut c, Action::FocusWorkspace(4));
         assert!(c.platform().windows[&1].hidden);
         c.handle(Message::Emergency);
         assert!(!c.platform().windows[&1].hidden);
@@ -330,5 +355,27 @@ mod tests {
         let mut c = ctl_with(1);
         c.handle(Message::Opened(77));
         assert!(c.desktop().workspace_of(77).is_none());
+    }
+
+    #[test]
+    fn minimizar_y_restaurar_reacomoda_el_resto() {
+        let mut c = ctl_with(3);
+        c.handle(Message::Minimized(2));
+        assert_eq!(c.desktop().windows_in(0), vec![1, 3]);
+        c.handle(Message::Restored(2));
+        assert_eq!(c.desktop().windows_in(0), vec![1, 2, 3]);
+        assert_no_lost_windows(&c);
+    }
+
+    #[test]
+    fn cambio_de_monitores_se_detecta_en_el_tick() {
+        use crate::domain::desktop::Monitor;
+        use crate::domain::geometry::Rect;
+        let mut c = ctl_with(2);
+        c.platform.monitors = vec![Monitor { id: 0, work_area: Rect::new(0, 0, 800, 500), primary: true }];
+        c.handle(Message::Tick);
+        for w in c.platform().windows.values() {
+            assert!(c.platform().monitors[0].work_area.contains_rect(&w.rect));
+        }
     }
 }

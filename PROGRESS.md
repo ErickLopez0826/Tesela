@@ -17,3 +17,11 @@ Verificación previa (estado inicial): PROGRESS.md no existía; solo estaba hech
 - ✅ Criterio "abrir, cerrar y cambiar entre varias ventanas sin que se pierdan ni queden fuera de pantalla": prueba unitaria con invariante + prueba real `tests/phase1_windows.rs` (ventanas WMTEST creadas por script).
 
 Cómo ejecutar la prueba real: `cargo test --test phase1_windows -- --ignored --nocapture --test-threads=1` (desde `src-tauri`).
+
+## Fase 2: Motor de layout ✅
+- ✅ Modelo de columnas y ventanas apiladas (`domain::layout`), con ejes columnas/filas y apilado vertical/horizontal.
+- ✅ Inserción a la derecha, reparto proporcional, mínimos ("llenado de agua"), cierre y movimiento (§5.1–5.4).
+- ✅ Monitores verticales (§5.5, eje configurable, filas por defecto) y caso límite sin espacio (§5.6, flotante centrada).
+- ✅ Estados de ventana gestionada/flotante/minimizada con vuelta a su posición (§7).
+- ✅ Criterio "todas las reglas de la sección 5 pasan sus pruebas": cada caso de las secciones "Layout" y "Monitores" de §13 tiene su prueba en `domain::layout` y `domain::desktop` (Desktop con dos monitores, mover workspace entre monitores, desconectar monitor).
+- Sin ventanas reales: el dominio se prueba con datos puros. La prueba real de la Fase 1 sigue pasando con el nuevo Desktop.

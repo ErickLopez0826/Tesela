@@ -9,6 +9,7 @@ use std::sync::mpsc::channel;
 use std::time::{Duration, Instant};
 
 use window_manager_lib::application::controller::Message;
+use window_manager_lib::domain::actions::Action;
 use window_manager_lib::domain::geometry::Rect;
 use window_manager_lib::domain::manageable::Scope;
 use window_manager_lib::infrastructure::windows::facts::{
@@ -121,7 +122,7 @@ fn ciclo_completo_abrir_cerrar_cambiar_y_emergencia() {
     assert!(max - min <= 3, "las columnas no son iguales: {widths:?}");
 
     // 2. Cambiar de workspace oculta; volver muestra y en su sitio.
-    rt.send(Message::SwitchWorkspace(1));
+    rt.send(Message::Action(Action::FocusWorkspace(5)));
     wait_until("ventanas ocultas en otro workspace", || a.ids.iter().all(|&id| cloaked(id)));
     let f = facts_of(a.ids[0]).unwrap();
     println!("método de ocultación observado: cloaked={} visible={}", f.cloaked, f.visible);
@@ -130,7 +131,7 @@ fn ciclo_completo_abrir_cerrar_cambiar_y_emergencia() {
     println!("recuperadas con --recover: {recovered}");
     assert_eq!(recovered, 3);
     wait_until("ventanas recuperadas visibles", || a.ids.iter().all(|&id| !cloaked(id)));
-    rt.send(Message::SwitchWorkspace(0));
+    rt.send(Message::Action(Action::FocusWorkspace(1)));
     wait_until("ventanas visibles de nuevo", || a.ids.iter().all(|&id| !cloaked(id) && within(&area, &frame(id))));
 
     // 3. Una ventana nueva (evento en vivo) se adopta; otra fuera de alcance no se toca.

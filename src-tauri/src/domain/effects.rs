@@ -10,4 +10,6 @@ pub enum Effect {
     Show(WindowId),
     Focus(WindowId),
     Close(WindowId),
+    Minimize(WindowId),
+    Restore(WindowId),
 }

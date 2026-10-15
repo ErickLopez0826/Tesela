@@ -6,16 +6,17 @@ use windows::core::BOOL;
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE};
 use windows::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEINPUT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    IsIconic, IsZoomed, PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, SWP_NOACTIVATE,
+    IsIconic, IsZoomed, PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SW_MINIMIZE,
     SWP_NOOWNERZORDER, SWP_NOZORDER, SW_HIDE, SW_RESTORE, SW_SHOWNA, WM_CLOSE,
 };
 
 use crate::application::ports::WindowPlatform;
 use crate::domain::effects::{Effect, WindowId};
+use crate::domain::desktop::Monitor;
 use crate::domain::geometry::Rect;
 use crate::domain::manageable::WindowFacts;
 use crate::infrastructure::windows::facts::{
-    facts_of, hwnd_from, primary_work_area, top_level_windows, visible_frame, window_exists, window_rect,
+    facts_of, hwnd_from, list_monitors, top_level_windows, visible_frame, window_exists, window_rect,
 };
 
 /// `DWMWA_CLOAK`: oculta la ventana sin minimizarla (§17 del plan).
@@ -156,13 +157,19 @@ impl WindowPlatform for Win32Platform {
         top_level_windows()
     }
 
-    fn work_area(&self) -> Rect {
-        primary_work_area()
+    fn monitors(&self) -> Vec<Monitor> {
+        list_monitors()
     }
 
     fn apply(&mut self, effect: &Effect) -> Result<(), String> {
         let id = match effect {
-            Effect::Place { id, .. } | Effect::Hide(id) | Effect::Show(id) | Effect::Focus(id) | Effect::Close(id) => *id,
+            Effect::Place { id, .. }
+            | Effect::Hide(id)
+            | Effect::Show(id)
+            | Effect::Focus(id)
+            | Effect::Close(id)
+            | Effect::Minimize(id)
+            | Effect::Restore(id) => *id,
         };
         if !window_exists(id) {
             return Err("la ventana ya no existe".into());
@@ -193,6 +200,12 @@ impl WindowPlatform for Win32Platform {
                     self.persist_hidden();
                 }
             }
+            Effect::Minimize(_) => unsafe {
+                let _ = ShowWindow(hwnd_from(id), SW_MINIMIZE);
+            },
+            Effect::Restore(_) => unsafe {
+                let _ = ShowWindow(hwnd_from(id), SW_RESTORE);
+            },
             Effect::Show(_) => {
                 self.reveal(id);
                 self.persist_hidden();
