@@ -3,11 +3,17 @@ use crate::domain::desktop::Monitor;
 use crate::domain::effects::{Effect, WindowId};
 use crate::domain::manageable::WindowFacts;
 use crate::domain::shortcuts::Chord;
+use crate::domain::snapshot::{StateSnapshot, SystemStats};
 use crate::domain::window::WindowCandidate;
 
 /// Puerto: fuente de ventanas del sistema.
 pub trait WindowEnumerator {
     fn enumerate(&self) -> Result<Vec<WindowCandidate>, String>;
+}
+
+/// Puerto: métricas del sistema (CPU, RAM).
+pub trait SystemStatsProvider {
+    fn read(&mut self) -> SystemStats;
 }
 
 /// Puerto: todo lo que el gestor necesita de Windows.
@@ -29,6 +35,10 @@ pub trait WindowPlatform {
     fn set_hotkeys(&mut self, bindings: &[(Chord, Action)]) -> Vec<String>;
     /// Abre una terminal (alt+enter).
     fn open_terminal(&mut self);
+    /// Publica el estado visible (workspaces, ventana enfocada...) para la barra y el panel.
+    fn publish_state(&mut self, state: &StateSnapshot);
+    /// Abre o cierra el panel desplegable en el monitor indicado (§9.2).
+    fn toggle_panel(&mut self, monitor: u32);
     /// Avisa al usuario (registro y, si hay interfaz, un aviso en pantalla).
     fn notify(&mut self, text: &str);
 }

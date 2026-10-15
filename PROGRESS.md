@@ -40,3 +40,9 @@ Cómo ejecutar la prueba real: `cargo test --test phase1_windows -- --ignored --
 - ✅ Pantalla completa (§6.4): oculta la señal de barra del monitor correspondiente (gestionadas y excluidas); dos pantallas completas en monitores distintos se manejan por separado. La barra visual llega en la Fase 5; hoy la señal es el efecto `SetBar` / evento `wm-bar-visibility`.
 - ✅ Criterio "un juego y una aplicación excluida se abren y funcionan como si GlazeWM no existiera": `tests/phase4_exclusions.rs` (real) abre dos ventanas gestionadas, una app excluida y un "juego" sin borde que se agranda a pantalla completa: ni se mueven ni cambian de tamaño, el reparto no cambia, la barra se oculta y reaparece. Limitación: usa ventanas WPF de prueba, no un juego de verdad ni aplicaciones de terceros.
 - 🟡 Alcances de §6.5 distintos de "siempre": no implementados (el plan los marca como posteriores).
+
+## Fase 5: Barra y panel ✅ (contenido fijo)
+- ✅ Barra por monitor acoplada como AppBar (`--bar`): una ventana por monitor, alto escalado por DPI, se crea/retira al conectar o desconectar monitores y se oculta en pantalla completa.
+- ✅ Panel desplegable (clic en ☰ o `alt+b`): reloj, CPU, RAM y los 9 workspaces con clic para cambiar.
+- ✅ Criterio "la barra reserva su espacio y no se encima con las ventanas": `tests/phase5_bar.rs` arranca la app real con tus dos monitores (1920×1080 y 1080×1920 vertical): hay una barra por monitor, el área útil de cada uno quedó por debajo de la barra y las ventanas de prueba gestionadas quedan debajo de ella (y=60 = 40 de barra + 20 de margen). Al cerrar la app el área útil vuelve a la original.
+- 🟡 Contenido de la barra no configurable por zonas todavía (B-6).

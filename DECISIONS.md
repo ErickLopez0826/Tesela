@@ -55,3 +55,13 @@ Decisiones tomadas durante el desarrollo autónomo. Las marcadas **(por defecto,
 - **D-28 Excluida con el foco.** Mientras una ventana excluida tenga el foco, los atajos que mueven, redimensionan, cierran, minimizan, flotan o envían a otro workspace no hacen nada (no actúan sobre otra ventana a sus espaldas). Los atajos de foco y de workspace siguen funcionando.
 - **D-29 Señal de la barra.** La visibilidad de la barra por monitor sale como efecto `SetBar`; hasta la Fase 5 llega al frontend como evento Tauri `wm-bar-visibility` `[monitor, visible]`.
 - **D-30 Orden de arranque.** Los atajos se registran antes de adoptar ventanas (se descubrió una carrera real: una pulsación justo tras adoptar se perdía).
+
+## Fase 5 (barra y panel)
+
+- **D-31 La barra se activa con `--bar`.** Acoplar una AppBar cambia el área útil de todos tus monitores, así que no arranca sola mientras desarrollo. El instalador/arranque con Windows (Fase 10) pasará `--manage all --bar`.
+- **D-32 Barra como AppBar.** Una ventana de Tauri por monitor, sin marco ni foco (`WS_EX_NOACTIVATE`), acoplada arriba con `SHAppBarMessage`. Alto 40 px lógicos (se escala con el DPI del monitor). El área útil del monitor ya excluye la barra, así que el margen superior por defecto bajó de 60 px (que era para Zebar) a 20 px.
+- **D-33 Atajo del panel (por defecto, pendiente de revisión).** §9.2 dice "con un clic o un atajo" sin fijar la tecla. Se añadió la acción `toggle_panel` con `alt+b`, que no choca con ningún atajo de §8 ni de GlazeWM. Es el único atajo por defecto fuera de §8.
+- **D-34 Una página, tres ventanas.** `index.html?view=bar&monitor=<id>`, `?view=panel` y sin parámetro (ventana principal con ventanas/exclusiones).
+- **D-35 Datos de la barra.** El núcleo publica un `StateSnapshot` (workspaces, enfocada, pausa, modo, visibilidad de barra) solo cuando cambia, como evento `wm-state` y consultable con `get_state`. CPU y RAM salen de `sysinfo` y la interfaz las lee cada 2 s. Los botones de workspace llaman `run_action("workspace_N")`.
+- **D-36 Pantalla completa.** La barra se oculta con `SW_HIDE`/`SW_SHOWNOACTIVATE` pero conserva su franja reservada, para no reordenar todo cada vez que un juego entra o sale de pantalla completa.
+- **D-37 Panel.** Ventana propia (380×560 lógicos) que aparece a la derecha, bajo la barra del monitor activo, y se cierra al perder el foco o con Escape.

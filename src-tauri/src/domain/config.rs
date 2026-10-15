@@ -28,12 +28,13 @@ pub struct LayoutConfig {
 
 impl Default for LayoutConfig {
     fn default() -> Self {
-        // Mismos gaps que el config.yaml de GlazeWM (§16): 20px entre ventanas, 60px arriba para la barra.
+        // Gaps del config.yaml de GlazeWM (§16): 20px entre ventanas y de margen. La barra reserva su
+        // propio espacio como AppBar, así que arriba basta el margen de 20px (antes eran 60px para Zebar).
         LayoutConfig {
             min_column_width: 200,
             min_window_height: 120,
             inner_gap: 20,
-            outer_top: 60,
+            outer_top: 20,
             outer_right: 20,
             outer_bottom: 20,
             outer_left: 20,

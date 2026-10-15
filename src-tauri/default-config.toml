@@ -6,7 +6,7 @@
 min_column_width = 200
 min_window_height = 120
 inner_gap = 20
-outer_top = 60        # espacio para la barra superior
+outer_top = 20        # la barra reserva su propio espacio (AppBar); esto es solo el margen
 outer_right = 20
 outer_bottom = 20
 outer_left = 20
@@ -252,6 +252,12 @@ keys = ["alt+shift+q"]
 [[keybinding]]
 action = "cycle_focus"
 keys = ["alt+space"]
+
+# Panel desplegable (§9.2): el plan dice "con un clic o un atajo" sin fijar la tecla.
+# alt+b es un valor por defecto pendiente de revisión (DECISIONS.md D-33).
+[[keybinding]]
+action = "toggle_panel"
+keys = ["alt+b"]
 
 # 8.7 Sistema
 [[keybinding]]

@@ -9,6 +9,7 @@ use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, MonitorFromWindow, HDC, HMONITOR, MONITORINFO,
     MONITOR_DEFAULTTOPRIMARY,
 };
+use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::System::Threading::{
     GetCurrentProcessId, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
     PROCESS_QUERY_LIMITED_INFORMATION,
@@ -100,6 +101,16 @@ pub fn primary_work_area() -> Rect {
     }
 }
 
+fn dpi_scale(mon: HMONITOR) -> f64 {
+    let (mut x, mut y) = (96u32, 96u32);
+    unsafe {
+        if GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut x, &mut y).is_ok() && x > 0 {
+            return x as f64 / 96.0;
+        }
+    }
+    1.0
+}
+
 /// Monitores conectados, de izquierda a derecha y de arriba abajo.
 pub fn list_monitors() -> Vec<Monitor> {
     unsafe extern "system" fn collect(mon: HMONITOR, _dc: HDC, _rc: *mut RECT, lparam: LPARAM) -> BOOL {
@@ -110,6 +121,7 @@ pub fn list_monitors() -> Vec<Monitor> {
                 id: mon.0 as usize as u32,
                 work_area: to_rect(info.rcWork),
                 bounds: to_rect(info.rcMonitor),
+                dpi_scale: dpi_scale(mon),
                 primary: info.dwFlags & MONITORINFOF_PRIMARY != 0,
             });
         }

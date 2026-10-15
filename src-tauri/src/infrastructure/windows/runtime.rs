@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -26,7 +26,7 @@ use crate::domain::manageable::Scope;
 use crate::domain::rules::{ExclusionList, WindowRule};
 use crate::domain::shortcuts::{Chord, Keymap};
 use crate::infrastructure::windows::facts::id_of;
-use crate::infrastructure::windows::platform::Win32Platform;
+use crate::infrastructure::windows::platform::{Callbacks, Win32Platform};
 
 const EVENT_SYSTEM_FOREGROUND: u32 = 0x0003;
 const EVENT_SYSTEM_MOVESIZEEND: u32 = 0x000B;
@@ -84,10 +84,8 @@ pub struct RuntimeOptions {
     pub settings: Settings,
     pub keymap: Keymap,
     pub loader: Option<ConfigLoader>,
-    /// Recibe los avisos para el usuario.
-    pub notice: Arc<dyn Fn(&str) + Send + Sync>,
-    /// Recibe (monitor, visible) cuando la barra de un monitor debe ocultarse o mostrarse (§6.4).
-    pub bar: Arc<dyn Fn(u32, bool) + Send + Sync>,
+    /// Avisos hacia la interfaz: avisos, barra, estado y panel.
+    pub callbacks: Callbacks,
     pub exclusions: ExclusionList,
     pub rules: Vec<WindowRule>,
     /// Se llama si el usuario pide salir de la app (alt+shift+e).
@@ -102,8 +100,7 @@ impl RuntimeOptions {
             settings: Settings::default(),
             keymap: Keymap::default(),
             loader: None,
-            notice: Arc::new(|_| {}),
-            bar: Arc::new(|_, _| {}),
+            callbacks: Callbacks::silent(),
             exclusions: ExclusionList::default(),
             rules: vec![],
             on_exit: Box::new(|| {}),
@@ -186,8 +183,8 @@ impl Drop for Runtime {
 }
 
 fn controller_loop(rx: Receiver<Message>, platform_thread_id: u32, options: RuntimeOptions) {
-    let RuntimeOptions { scope, settings, keymap, loader, notice, bar, exclusions, rules, on_exit } = options;
-    let platform = Win32Platform::with_hotkeys(platform_thread_id, notice, bar);
+    let RuntimeOptions { scope, settings, keymap, loader, callbacks, exclusions, rules, on_exit } = options;
+    let platform = Win32Platform::with_callbacks(platform_thread_id, callbacks);
     // Si el controlador falla por un pánico, las ventanas ocultas se restauran antes de salir.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut controller = Controller::with_all(platform, scope, settings, keymap, exclusions, rules);

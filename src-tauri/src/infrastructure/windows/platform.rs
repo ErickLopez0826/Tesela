@@ -18,6 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::application::ports::WindowPlatform;
 use crate::domain::actions::Action;
 use crate::domain::shortcuts::Chord;
+use crate::domain::snapshot::StateSnapshot;
 use crate::infrastructure::windows::runtime::{HotkeyRequest, HOTKEY_REQUEST, WM_APP_SET_HOTKEYS};
 use crate::domain::effects::{Effect, WindowId};
 use crate::domain::desktop::Monitor;
@@ -36,14 +37,34 @@ pub enum HideMethod {
     SwHide,
 }
 
+/// Avisos hacia la interfaz que la plataforma invoca.
+#[derive(Clone)]
+pub struct Callbacks {
+    pub notice: Arc<dyn Fn(&str) + Send + Sync>,
+    pub bar: Arc<dyn Fn(u32, bool) + Send + Sync>,
+    pub state: Arc<dyn Fn(&StateSnapshot) + Send + Sync>,
+    pub panel: Arc<dyn Fn(u32) + Send + Sync>,
+}
+
+impl Callbacks {
+    /// Callbacks que no hacen nada (pruebas).
+    pub fn silent() -> Self {
+        Callbacks { notice: Arc::new(|_| {}), bar: Arc::new(|_, _| {}), state: Arc::new(|_| {}), panel: Arc::new(|_| {}) }
+    }
+}
+
 #[derive(Default)]
 pub struct Win32Platform {
     /// Hilo con el bucle de mensajes que registra los atajos (ver `runtime`).
     hotkey_thread: Option<u32>,
     /// Receptor de avisos para el usuario.
     notice: Option<Arc<dyn Fn(&str) + Send + Sync>>,
-    /// Receptor de la visibilidad de la barra por monitor (la barra llega en la Fase 5).
+    /// Receptor de la visibilidad de la barra por monitor.
     bar: Option<Arc<dyn Fn(u32, bool) + Send + Sync>>,
+    /// Receptor del estado visible para la barra y el panel.
+    state: Option<Arc<dyn Fn(&StateSnapshot) + Send + Sync>>,
+    /// Abre o cierra el panel desplegable de un monitor.
+    panel: Option<Arc<dyn Fn(u32) + Send + Sync>>,
     /// Posición original de cada ventana la primera vez que se toca.
     originals: HashMap<WindowId, Rect>,
     /// Ventanas ocultas y con qué método.
@@ -70,12 +91,15 @@ impl Win32Platform {
         Self::default()
     }
 
-    pub fn with_hotkeys(
-        thread_id: u32,
-        notice: Arc<dyn Fn(&str) + Send + Sync>,
-        bar: Arc<dyn Fn(u32, bool) + Send + Sync>,
-    ) -> Self {
-        Win32Platform { hotkey_thread: Some(thread_id), notice: Some(notice), bar: Some(bar), ..Default::default() }
+    pub fn with_callbacks(thread_id: u32, cb: Callbacks) -> Self {
+        Win32Platform {
+            hotkey_thread: Some(thread_id),
+            notice: Some(cb.notice),
+            bar: Some(cb.bar),
+            state: Some(cb.state),
+            panel: Some(cb.panel),
+            ..Default::default()
+        }
     }
 
     /// Guarda las ventanas ocultas para poder recuperarlas con `--recover` tras un cierre brusco (D-3).
@@ -268,6 +292,18 @@ impl WindowPlatform for Win32Platform {
             return bindings.iter().map(|(c, _)| c.to_string()).collect();
         }
         rx.recv_timeout(Duration::from_secs(3)).unwrap_or_default()
+    }
+
+    fn publish_state(&mut self, state: &StateSnapshot) {
+        if let Some(cb) = &self.state {
+            cb(state);
+        }
+    }
+
+    fn toggle_panel(&mut self, monitor: u32) {
+        if let Some(cb) = &self.panel {
+            cb(monitor);
+        }
     }
 
     fn open_terminal(&mut self) {

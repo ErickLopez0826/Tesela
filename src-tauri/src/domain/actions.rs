@@ -29,6 +29,8 @@ pub enum Action {
     // 8.7 sistema
     OpenTerminal,
     TogglePause,
+    /// Abre o cierra el panel desplegable (§9.2).
+    TogglePanel,
     ReloadConfig,
     Redraw,
     Exit,
@@ -68,6 +70,7 @@ impl Action {
             CycleFocus => "cycle_focus".into(),
             OpenTerminal => "open_terminal".into(),
             TogglePause => "toggle_pause".into(),
+            TogglePanel => "toggle_panel".into(),
             ReloadConfig => "reload_config".into(),
             Redraw => "redraw".into(),
             Exit => "exit".into(),
@@ -120,6 +123,7 @@ impl Action {
             "cycle_focus" => CycleFocus,
             "open_terminal" => OpenTerminal,
             "toggle_pause" => TogglePause,
+            "toggle_panel" => TogglePanel,
             "reload_config" => ReloadConfig,
             "redraw" => Redraw,
             "exit" => Exit,
@@ -156,6 +160,7 @@ mod tests {
             Action::CycleFocus,
             Action::OpenTerminal,
             Action::TogglePause,
+            Action::TogglePanel,
             Action::ReloadConfig,
             Action::Redraw,
             Action::Exit,

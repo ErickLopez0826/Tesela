@@ -70,7 +70,7 @@ mod tests {
     fn la_config_por_defecto_es_valida() {
         let v = default();
         assert_eq!(v.settings.vertical_axis, Axis::Rows);
-        assert_eq!(v.settings.layout.gaps.top, 60);
+        assert_eq!(v.settings.layout.gaps.top, 20);
         assert_eq!(v.settings.bindings[0], Some(0));
         assert_eq!(v.settings.bindings[4], Some(1));
         assert_eq!(v.settings.bindings[8], None);
@@ -123,8 +123,10 @@ mod tests {
         add("alt+shift+r", ReloadConfig);
         add("alt+shift+w", Redraw);
         add("alt+shift+e", Exit);
+        // Fuera de §8: el plan pide abrir el panel "con un clic o un atajo" sin definir la tecla (D-33).
+        add("alt+b", TogglePanel);
 
-        assert_eq!(v.keymap.global().len(), expected.len(), "ni más ni menos atajos globales que la sección 8");
+        assert_eq!(v.keymap.global().len(), expected.len(), "ni más ni menos atajos globales que la sección 8 (+ el del panel)");
         for (chord, action) in &expected {
             has(&v, "", chord, *action);
         }

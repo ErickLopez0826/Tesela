@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use crate::domain::actions::Action;
 use crate::domain::effects::{Effect, WindowId};
 use crate::domain::geometry::Rect;
+use crate::domain::snapshot::{MonitorSnapshot, WorkspaceSnapshot};
 use crate::domain::layout::{focus_neighbor, Axis, Dir, Layout, LayoutSettings, NoRoom, Orientation};
 
 pub const WORKSPACE_COUNT: usize = 9;
@@ -20,11 +21,13 @@ pub struct Monitor {
     /// Pantalla completa del monitor, para ventanas en pantalla completa.
     pub bounds: Rect,
     pub primary: bool,
+    /// Escala de DPI del monitor (1.0 = 100 %), para dimensionar la barra.
+    pub dpi_scale: f64,
 }
 
 impl Monitor {
     pub fn new(id: MonitorId, work_area: Rect, primary: bool) -> Self {
-        Monitor { id, work_area, bounds: work_area, primary }
+        Monitor { id, work_area, bounds: work_area, primary, dpi_scale: 1.0 }
     }
 
     pub fn is_vertical(&self) -> bool {
@@ -239,6 +242,42 @@ impl Desktop {
 
     pub fn visible_workspace_on(&self, monitor: MonitorId) -> Option<usize> {
         (0..WORKSPACE_COUNT).find(|&i| self.workspaces[i].visible && self.workspaces[i].monitor == monitor)
+    }
+
+    /// Monitores y workspaces tal como los ve la interfaz.
+    pub fn snapshot(&self) -> (Vec<MonitorSnapshot>, Vec<WorkspaceSnapshot>) {
+        let active_monitor = self.workspaces[self.active].monitor;
+        let monitors = self
+            .monitors
+            .iter()
+            .map(|m| MonitorSnapshot {
+                id: m.id,
+                primary: m.primary,
+                vertical: m.is_vertical(),
+                visible_workspace: self.visible_workspace_on(m.id).map(|w| w + 1),
+                bar_visible: self.bar_state.get(&m.id).copied().unwrap_or(true),
+            })
+            .collect();
+        let workspaces = (0..WORKSPACE_COUNT)
+            .map(|i| WorkspaceSnapshot {
+                number: i + 1,
+                monitor: self.workspaces[i].monitor,
+                visible: self.workspaces[i].visible,
+                active: self.workspaces[i].visible && self.workspaces[i].monitor == active_monitor && i == self.active,
+                window_count: self.windows_in(i).len(),
+            })
+            .collect();
+        (monitors, workspaces)
+    }
+
+    /// Monitor del workspace activo (donde está el foco).
+    pub fn active_monitor(&self) -> MonitorId {
+        self.workspaces[self.active].monitor
+    }
+
+    /// Título y ejecutable los conoce la plataforma; aquí solo el id de la ventana enfocada.
+    pub fn focused_window(&self) -> Option<WindowId> {
+        self.focused()
     }
 
     // ---------- ayudas internas ----------
@@ -1052,6 +1091,7 @@ impl Desktop {
             | Action::ExitResizeMode
             | Action::OpenTerminal
             | Action::TogglePause
+            | Action::TogglePanel
             | Action::ReloadConfig
             | Action::Exit => vec![],
         }

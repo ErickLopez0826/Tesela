@@ -6,14 +6,15 @@ pub mod infrastructure;
 pub mod interface;
 
 use domain::manageable::Scope;
-#[allow(unused_imports)]
 use tauri::Manager;
 
-/// Argumentos de línea de comandos (ver DECISIONS.md D-1 y D-3).
+/// Argumentos de línea de comandos (ver DECISIONS.md D-1, D-3 y D-31).
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct CliArgs {
     pub manage: Option<Scope>,
     pub recover: bool,
+    /// Muestra la barra de cada monitor (reserva espacio en pantalla).
+    pub bar: bool,
 }
 
 pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<CliArgs, String> {
@@ -26,6 +27,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<CliArgs, St
                 out.manage = Some(Scope::parse(&v).ok_or_else(|| format!("alcance inválido: {v}"))?);
             }
             "--recover" => out.recover = true,
+            "--bar" => out.bar = true,
             _ => {}
         }
     }
@@ -59,44 +61,16 @@ pub fn run() {
             interface::commands::list_exclusions,
             interface::commands::add_exclusion,
             interface::commands::remove_exclusion,
+            interface::commands::get_state,
+            interface::commands::system_stats,
+            interface::commands::run_action,
+            interface::commands::open_panel,
+            interface::commands::close_panel,
         ])
         .setup(move |app| {
             #[cfg(windows)]
-            if let Some(scope) = args.manage.clone() {
-                use std::sync::Arc;
-                use tauri::Emitter;
-
-                let handle = app.handle().clone();
-                let notice: Arc<dyn Fn(&str) + Send + Sync> = {
-                    let h = handle.clone();
-                    Arc::new(move |text: &str| {
-                        let _ = h.emit("wm-notice", text.to_string());
-                    })
-                };
-                let bar: Arc<dyn Fn(u32, bool) + Send + Sync> = {
-                    let h = handle.clone();
-                    Arc::new(move |monitor: u32, visible: bool| {
-                        let _ = h.emit("wm-bar-visibility", (monitor, visible));
-                    })
-                };
-                let (config, warning) = infrastructure::config_file::load_or_create();
-                if let Some(w) = warning {
-                    eprintln!("[wm] {w}");
-                    notice(&w);
-                }
-                let options = infrastructure::windows::runtime::RuntimeOptions {
-                    loader: Some(Box::new(infrastructure::config_file::load_file)),
-                    notice,
-                    bar,
-                    exclusions: store.list(),
-                    on_exit: Box::new(move || handle.exit(0)),
-                    ..infrastructure::windows::runtime::RuntimeOptions::from_config(scope, config)
-                };
-                let runtime = infrastructure::windows::runtime::Runtime::start_with(options);
-                let state = app.state::<interface::commands::AppState>();
-                *state.manager.lock().unwrap() = Some(runtime);
-            }
-            let _ = &app;
+            setup_windows(app, &args, &store);
+            let _ = (&app, &args);
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -105,13 +79,97 @@ pub fn run() {
     app.run(|_app, event| {
         if let tauri::RunEvent::Exit = event {
             #[cfg(windows)]
-            if let Some(state) = _app.try_state::<interface::commands::AppState>() {
-                if let Some(rt) = state.manager.lock().unwrap().take() {
-                    rt.stop();
+            {
+                interface::bar::undock_all(_app);
+                if let Some(state) = _app.try_state::<interface::commands::AppState>() {
+                    if let Some(rt) = state.manager.lock().unwrap().take() {
+                        rt.stop();
+                    }
                 }
             }
         }
     });
+}
+
+/// Arranque específico de Windows: barras y gestor de ventanas, según los argumentos.
+#[cfg(windows)]
+fn setup_windows(app: &mut tauri::App, args: &CliArgs, store: &std::sync::Arc<infrastructure::exclusion_store::ExclusionStore>) {
+    use std::sync::Arc;
+    use tauri::Emitter;
+
+    use infrastructure::windows::platform::Callbacks;
+    use infrastructure::windows::runtime::{Runtime, RuntimeOptions};
+
+    let handle = app.handle().clone();
+
+    if args.bar {
+        interface::bar::sync_bars(&handle, &infrastructure::windows::facts::list_monitors());
+        // Vigila conexiones y desconexiones de monitores para crear y retirar barras.
+        let watcher = handle.clone();
+        std::thread::spawn(move || {
+            let key = |v: &[domain::desktop::Monitor]| {
+                v.iter().map(|m| (m.id, m.bounds, m.dpi_scale.to_bits())).collect::<Vec<_>>()
+            };
+            let mut last = infrastructure::windows::facts::list_monitors();
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                // Solo cuenta la geometría real del monitor; el área útil cambia al acoplar nuestras barras.
+                let now = infrastructure::windows::facts::list_monitors();
+                if key(&now) != key(&last) {
+                    let h = watcher.clone();
+                    let monitors = now.clone();
+                    let _ = watcher.run_on_main_thread(move || interface::bar::sync_bars(&h, &monitors));
+                    last = now;
+                }
+            }
+        });
+    }
+
+    let Some(scope) = args.manage.clone() else { return };
+    let callbacks = Callbacks {
+        notice: {
+            let h = handle.clone();
+            Arc::new(move |text: &str| {
+                let _ = h.emit("wm-notice", text.to_string());
+            })
+        },
+        bar: {
+            let h = handle.clone();
+            Arc::new(move |monitor: u32, visible: bool| {
+                let _ = h.emit("wm-bar-visibility", (monitor, visible));
+                interface::bar::set_bar_visible(&h, monitor, visible);
+            })
+        },
+        state: {
+            let h = handle.clone();
+            Arc::new(move |state: &domain::snapshot::StateSnapshot| {
+                if let Some(s) = h.try_state::<interface::commands::AppState>() {
+                    *s.last_state.lock().unwrap() = Some(state.clone());
+                }
+                let _ = h.emit("wm-state", state.clone());
+            })
+        },
+        panel: {
+            let h = handle.clone();
+            Arc::new(move |monitor: u32| interface::bar::toggle_panel(&h, monitor))
+        },
+    };
+    let (config, warning) = infrastructure::config_file::load_or_create();
+    if let Some(w) = warning {
+        eprintln!("[wm] {w}");
+        (callbacks.notice)(&w);
+    }
+    let exit_handle = handle.clone();
+    let options = RuntimeOptions {
+        loader: Some(Box::new(infrastructure::config_file::load_file)),
+        callbacks,
+        exclusions: store.list(),
+        on_exit: Box::new(move || exit_handle.exit(0)),
+        ..RuntimeOptions::from_config(scope, config)
+    };
+    let runtime = Runtime::start_with(options);
+    let state = app.state::<interface::commands::AppState>();
+    *state.manager.lock().unwrap() = Some(runtime);
 }
 
 #[cfg(test)]
@@ -140,7 +198,8 @@ mod tests {
     }
 
     #[test]
-    fn recover_se_reconoce() {
-        assert!(parse_args(a(&["--recover"])).unwrap().recover);
+    fn recover_y_bar_se_reconocen() {
+        let r = parse_args(a(&["--recover", "--bar"])).unwrap();
+        assert!(r.recover && r.bar);
     }
 }

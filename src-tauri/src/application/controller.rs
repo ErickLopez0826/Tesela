@@ -8,6 +8,7 @@ use crate::domain::effects::{Effect, WindowId};
 use crate::domain::manageable::{is_manageable, Scope};
 use crate::domain::rules::{apply_rules, ExclusionList, WindowRule};
 use crate::domain::shortcuts::Keymap;
+use crate::domain::snapshot::{FocusedSnapshot, StateSnapshot};
 
 /// Nombre del modo de teclado que activa `EnterResizeMode`.
 const RESIZE_MODE: &str = "resize";
@@ -47,6 +48,7 @@ pub struct Controller<P: WindowPlatform> {
     loader: Option<ConfigLoader>,
     paused: bool,
     exit_requested: bool,
+    last_state: Option<StateSnapshot>,
 }
 
 impl<P: WindowPlatform> Controller<P> {
@@ -79,11 +81,13 @@ impl<P: WindowPlatform> Controller<P> {
             loader: None,
             paused: false,
             exit_requested: false,
+            last_state: None,
         };
         // Primero los atajos (disponibles de inmediato, incluida la salida), luego se adoptan las ventanas.
         c.apply_hotkeys();
         c.adopt_existing();
         c.sync_bar();
+        c.publish_state();
         c
     }
 
@@ -136,6 +140,21 @@ impl<P: WindowPlatform> Controller<P> {
         };
         let fx = self.desk.track_window(id, opts);
         self.run(fx);
+    }
+
+    /// Publica el estado para la interfaz solo cuando cambió.
+    fn publish_state(&mut self) {
+        let (monitors, workspaces) = self.desk.snapshot();
+        let focused = self
+            .desk
+            .focused_window()
+            .and_then(|id| self.platform.facts(id))
+            .map(|f| FocusedSnapshot { exe: f.exe, title: f.title });
+        let state = StateSnapshot { monitors, workspaces, focused, paused: self.paused, mode: self.mode.clone() };
+        if self.last_state.as_ref() != Some(&state) {
+            self.platform.publish_state(&state);
+            self.last_state = Some(state);
+        }
     }
 
     /// Aplica los cambios de visibilidad de la barra (§6.4).
@@ -262,6 +281,10 @@ impl<P: WindowPlatform> Controller<P> {
             Action::TogglePause => self.set_paused(!self.paused),
             Action::ReloadConfig => self.reload_config(),
             Action::OpenTerminal => self.platform.open_terminal(),
+            Action::TogglePanel => {
+                let monitor = self.desk.active_monitor();
+                self.platform.toggle_panel(monitor);
+            }
             Action::Exit => {
                 self.exit_requested = true;
             }
@@ -326,6 +349,7 @@ impl<P: WindowPlatform> Controller<P> {
             }
         }
         self.sync_bar();
+        self.publish_state();
         true
     }
 }
@@ -359,6 +383,8 @@ pub mod fake {
         pub closed: Vec<WindowId>,
         pub apply_count: usize,
         pub bar_log: Vec<(u32, bool)>,
+        pub states: Vec<StateSnapshot>,
+        pub panel_log: Vec<u32>,
         pub minimize_log: Vec<WindowId>,
         /// Combinaciones que el sistema "rechaza" al registrar (simula otro programa que las usa).
         pub reject: Vec<String>,
@@ -376,6 +402,8 @@ pub mod fake {
                 closed: vec![],
                 apply_count: 0,
                 bar_log: vec![],
+                states: vec![],
+                panel_log: vec![],
                 minimize_log: vec![],
                 reject: vec![],
             }
@@ -460,6 +488,12 @@ pub mod fake {
         }
         fn open_terminal(&mut self) {
             self.terminals += 1;
+        }
+        fn publish_state(&mut self, state: &StateSnapshot) {
+            self.states.push(state.clone());
+        }
+        fn toggle_panel(&mut self, monitor: u32) {
+            self.panel_log.push(monitor);
         }
         fn notify(&mut self, text: &str) {
             self.notices.push(text.to_string());
@@ -760,7 +794,7 @@ mod tests {
         let mut wins: Vec<_> = c.platform().windows.iter().map(|(id, w)| (*id, w.rect, w.hidden)).collect();
         wins.sort_by_key(|w| w.0);
         format!(
-            "{wins:?}|ws={}|focus={:?}|closed={:?}|min={:?}|term={}|notices={}|paused={}|mode={:?}|applies={}|exit={}",
+            "{wins:?}|ws={}|focus={:?}|closed={:?}|min={:?}|term={}|notices={}|paused={}|mode={:?}|applies={}|exit={}|panel={:?}",
             c.desktop().active_workspace(),
             c.platform().focus_log,
             c.platform().closed,
@@ -771,6 +805,7 @@ mod tests {
             c.current_mode(),
             c.platform().apply_count,
             c.exit_requested(),
+            c.platform().panel_log,
         )
     }
 
@@ -930,5 +965,57 @@ mod tests {
         assert!(c.platform().windows[&1].hidden, "va a un workspace oculto");
         assert_eq!(c.desktop().entry(2).unwrap().kind, crate::domain::desktop::Kind::Floating);
         assert_eq!(c.platform().windows[&3].rect.w, 1000, "la tercera queda sola en el layout");
+    }
+
+    // ---------- Fase 5: estado para la barra y el panel ----------
+
+    #[test]
+    fn publica_el_estado_inicial_y_solo_cuando_cambia() {
+        let mut c = ctl_with(2);
+        assert_eq!(c.platform().states.len(), 1, "estado inicial");
+        let s = &c.platform().states[0];
+        assert_eq!(s.workspaces.len(), 9);
+        assert_eq!(s.workspaces.iter().find(|w| w.number == 1).map(|w| (w.active, w.window_count)), Some((true, 2)));
+        assert_eq!(s.monitors[0].visible_workspace, Some(1));
+        assert!(s.monitors[0].bar_visible);
+        c.handle(Message::Tick);
+        c.handle(Message::Tick);
+        assert_eq!(c.platform().states.len(), 1, "sin cambios no se republica");
+        act(&mut c, Action::FocusWorkspace(3));
+        assert_eq!(c.platform().states.len(), 2);
+        let s = c.platform().states.last().unwrap();
+        assert_eq!(s.workspaces.iter().find(|w| w.number == 3).map(|w| w.active), Some(true));
+        assert_eq!(s.workspaces.iter().find(|w| w.number == 1).map(|w| w.active), Some(false));
+    }
+
+    #[test]
+    fn el_estado_incluye_la_ventana_enfocada_pausa_y_modo() {
+        let cfg = config_with(&[("resize_mode", &["alt+r"], None), ("resize_width_-2", &["h"], Some("resize"))]);
+        let mut c = ctl_cfg(2, &cfg);
+        let focused = c.platform().states.last().unwrap().focused.clone().expect("hay ventana enfocada");
+        assert!(focused.title.starts_with("WMTEST"));
+        press(&mut c, "alt+r");
+        assert_eq!(c.platform().states.last().unwrap().mode.as_deref(), Some("resize"));
+        c.handle(Message::Emergency);
+        let s = c.platform().states.last().unwrap();
+        assert!(s.paused && s.mode.is_none());
+    }
+
+    #[test]
+    fn la_pantalla_completa_se_refleja_en_el_estado_de_la_barra() {
+        let mut p = FakePlatform::new();
+        with_exe(&mut p, 1, "a.exe", "WMTEST a");
+        let mut c = ctl_excl(p, ExclusionList::default());
+        c.platform.windows.get_mut(&1).unwrap().facts.fullscreen = true;
+        c.handle(Message::Tick);
+        assert!(!c.platform().states.last().unwrap().monitors[0].bar_visible);
+    }
+
+    #[test]
+    fn el_atajo_del_panel_pide_abrirlo_en_el_monitor_activo() {
+        let cfg = config_with(&[("toggle_panel", &["alt+b"], None)]);
+        let mut c = ctl_cfg(1, &cfg);
+        assert!(press(&mut c, "alt+b"));
+        assert_eq!(c.platform().panel_log, vec![0]);
     }
 }

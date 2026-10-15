@@ -22,3 +22,9 @@ GlazeWM sigue corriendo y ya registra `alt+h`, `alt+1`, etc. Dos programas no pu
 - Reglas de GlazeWM no migradas por depender de la clase de ventana (no está en el plan): Excel/Word/PowerPoint distintos de su ventana principal, Lively (clase HwndWrapper) y PowerToys PowerAccent. También las que solo usan título (Isaac, Mewgenics...): la exclusión es por ejecutable (§6.3). Se pueden añadir desde el panel.
 - Bordes de ventana enfocada/no enfocada con colores (§16, "conceptos que se conservan") no aparecen en ninguna fase de §12; no se implementaron. Propuesta: añadirlos en la Fase 5 con DWMWA_BORDER_COLOR.
 - No pude comprobar visualmente el panel de exclusiones dentro de la ventana de Tauri (solo pruebas de componente con Vitest y el comando Rust).
+
+## B-6 Pendientes de la Fase 5
+- §9.1 pide "contenido configurable por zonas (izquierda, centro, derecha)". Hoy el contenido de la barra es fijo (workspaces, ventana enfocada, CPU, RAM, reloj, botón del panel). Hacerlo configurable depende del sistema de módulos (Fase 7); lo retomo ahí.
+- Volumen, temperatura y medios de la barra (§9.1) llegan con los módulos de la Fase 6.
+- Bordes de ventana (§16) siguen sin implementar (ver B-5).
+- Verifiqué visualmente la barra (captura real de pantalla: CPU, RAM, reloj y botón del panel), pero no el panel desplegable ni el comportamiento con varios monitores a nivel visual; el panel y la barra están cubiertos por pruebas de componente y la reserva de espacio por una prueba real con tus dos monitores.

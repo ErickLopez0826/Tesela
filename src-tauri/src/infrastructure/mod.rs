@@ -2,6 +2,7 @@
 
 pub mod config_file;
 pub mod exclusion_store;
+pub mod stats;
 
 #[cfg(windows)]
 pub mod windows;
