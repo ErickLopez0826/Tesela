@@ -1,0 +1,257 @@
+//! Implementación Win32 del puerto `WindowPlatform`.
+
+use std::collections::HashMap;
+
+use windows::core::BOOL;
+use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE};
+use windows::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEINPUT};
+use windows::Win32::UI::WindowsAndMessaging::{
+    IsIconic, IsZoomed, PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, SWP_NOACTIVATE,
+    SWP_NOOWNERZORDER, SWP_NOZORDER, SW_HIDE, SW_RESTORE, SW_SHOWNA, WM_CLOSE,
+};
+
+use crate::application::ports::WindowPlatform;
+use crate::domain::effects::{Effect, WindowId};
+use crate::domain::geometry::Rect;
+use crate::domain::manageable::WindowFacts;
+use crate::infrastructure::windows::facts::{
+    facts_of, hwnd_from, primary_work_area, top_level_windows, visible_frame, window_exists, window_rect,
+};
+
+/// `DWMWA_CLOAK`: oculta la ventana sin minimizarla (§17 del plan).
+const DWMWA_CLOAK: DWMWINDOWATTRIBUTE = DWMWINDOWATTRIBUTE(13);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HideMethod {
+    Cloak,
+    SwHide,
+}
+
+#[derive(Default)]
+pub struct Win32Platform {
+    /// Posición original de cada ventana la primera vez que se toca.
+    originals: HashMap<WindowId, Rect>,
+    /// Ventanas ocultas y con qué método.
+    hidden: HashMap<WindowId, HideMethod>,
+    /// Último método de ocultación que funcionó (informe para PROGRESS.md).
+    pub last_hide_method: Option<HideMethod>,
+}
+
+/// Carpeta de estado de la app (`WM_STATE_DIR` en pruebas; `%LOCALAPPDATA%\window-manager` normalmente).
+pub fn state_dir() -> std::path::PathBuf {
+    if let Ok(d) = std::env::var("WM_STATE_DIR") {
+        return d.into();
+    }
+    let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into());
+    std::path::Path::new(&base).join("window-manager")
+}
+
+fn recovery_file() -> std::path::PathBuf {
+    state_dir().join("hidden-windows.txt")
+}
+
+impl Win32Platform {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Guarda las ventanas ocultas para poder recuperarlas con `--recover` tras un cierre brusco (D-3).
+    fn persist_hidden(&self) {
+        let path = recovery_file();
+        if self.hidden.is_empty() {
+            let _ = std::fs::remove_file(&path);
+            return;
+        }
+        let body: String = self
+            .hidden
+            .keys()
+            .map(|&id| format!("{id}\t{}\n", facts_of(id).map(|f| f.title).unwrap_or_default()))
+            .collect();
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(path, body);
+    }
+
+    fn remember(&mut self, id: WindowId) {
+        if !self.originals.contains_key(&id) {
+            if let Some(r) = window_rect(id) {
+                self.originals.insert(id, r);
+            }
+        }
+    }
+
+    fn set_cloak(id: WindowId, on: bool) -> bool {
+        let value = BOOL(on as i32);
+        unsafe {
+            DwmSetWindowAttribute(hwnd_from(id), DWMWA_CLOAK, &value as *const _ as *const _, size_of::<BOOL>() as u32)
+                .is_ok()
+        }
+    }
+
+    fn place(id: WindowId, target: Rect) {
+        unsafe {
+            let hwnd = hwnd_from(id);
+            if IsZoomed(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+        }
+        // Compensa el borde invisible de sombra para que el contenido visible llene el hueco.
+        let (mut x, mut y, mut w, mut h) = (target.x, target.y, target.w, target.h);
+        if let (Some(outer), Some(vis)) = (window_rect(id), visible_frame(id)) {
+            x -= vis.x - outer.x;
+            y -= vis.y - outer.y;
+            w += outer.w - vis.w;
+            h += outer.h - vis.h;
+        }
+        Self::set_pos(id, Rect::new(x, y, w, h));
+    }
+
+    /// Posiciona el rectángulo exterior tal cual (sin compensar sombras).
+    fn set_pos(id: WindowId, r: Rect) {
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd_from(id),
+                None,
+                r.x,
+                r.y,
+                r.w,
+                r.h,
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+            );
+        }
+    }
+
+    fn focus(id: WindowId) {
+        unsafe {
+            // Una entrada de ratón nula concede permiso de primer plano al proceso.
+            let input = INPUT {
+                r#type: INPUT_MOUSE,
+                Anonymous: INPUT_0 { mi: MOUSEINPUT::default() },
+            };
+            SendInput(&[input], size_of::<INPUT>() as i32);
+            let _ = SetForegroundWindow(hwnd_from(id));
+        }
+    }
+
+    fn reveal(&mut self, id: WindowId) {
+        match self.hidden.remove(&id) {
+            Some(HideMethod::Cloak) => {
+                Self::set_cloak(id, false);
+            }
+            Some(HideMethod::SwHide) => unsafe {
+                let _ = ShowWindow(hwnd_from(id), SW_SHOWNA);
+            },
+            None => {}
+        }
+    }
+}
+
+impl WindowPlatform for Win32Platform {
+    fn facts(&self, id: WindowId) -> Option<WindowFacts> {
+        facts_of(id)
+    }
+
+    fn top_level_windows(&self) -> Vec<WindowId> {
+        top_level_windows()
+    }
+
+    fn work_area(&self) -> Rect {
+        primary_work_area()
+    }
+
+    fn apply(&mut self, effect: &Effect) -> Result<(), String> {
+        let id = match effect {
+            Effect::Place { id, .. } | Effect::Hide(id) | Effect::Show(id) | Effect::Focus(id) | Effect::Close(id) => *id,
+        };
+        if !window_exists(id) {
+            return Err("la ventana ya no existe".into());
+        }
+        match effect {
+            Effect::Place { rect, .. } => {
+                if unsafe { IsIconic(hwnd_from(id)).as_bool() } {
+                    return Ok(());
+                }
+                self.remember(id);
+                Self::place(id, *rect);
+            }
+            Effect::Hide(_) => {
+                if self.hidden.contains_key(&id) {
+                    return Ok(());
+                }
+                self.remember(id);
+                if Self::set_cloak(id, true) {
+                    self.hidden.insert(id, HideMethod::Cloak);
+                    self.last_hide_method = Some(HideMethod::Cloak);
+                    self.persist_hidden();
+                } else {
+                    unsafe {
+                        let _ = ShowWindow(hwnd_from(id), SW_HIDE);
+                    }
+                    self.hidden.insert(id, HideMethod::SwHide);
+                    self.last_hide_method = Some(HideMethod::SwHide);
+                    self.persist_hidden();
+                }
+            }
+            Effect::Show(_) => {
+                self.reveal(id);
+                self.persist_hidden();
+            }
+            Effect::Focus(_) => Self::focus(id),
+            Effect::Close(_) => unsafe {
+                let _ = PostMessageW(Some(hwnd_from(id)), WM_CLOSE, Default::default(), Default::default());
+            },
+        }
+        Ok(())
+    }
+
+    fn forget(&mut self, id: WindowId) {
+        self.originals.remove(&id);
+        if self.hidden.remove(&id).is_some() {
+            self.persist_hidden();
+        }
+    }
+
+    fn restore_all(&mut self) {
+        let ids: Vec<WindowId> = self.hidden.keys().copied().collect();
+        for id in ids {
+            if window_exists(id) {
+                self.reveal(id);
+            }
+        }
+        for (&id, &r) in &self.originals {
+            if window_exists(id) {
+                Self::set_pos(id, r);
+            }
+        }
+        self.originals.clear();
+        self.persist_hidden();
+    }
+}
+
+/// Tras un cierre brusco: quita el cloak de todas las ventanas de nivel superior (D-3).
+pub fn recover_cloaked_windows() -> usize {
+    let mut n = 0;
+    // Ventanas ocultas con SW_HIDE que quedaron registradas: solo si siguen existiendo con el mismo título.
+    if let Ok(text) = std::fs::read_to_string(recovery_file()) {
+        for line in text.lines() {
+            let mut parts = line.splitn(2, '\t');
+            let (Some(id), Some(title)) = (parts.next().and_then(|v| v.parse::<isize>().ok()), parts.next()) else {
+                continue;
+            };
+            if facts_of(id).is_some_and(|f| f.title == title && !f.visible) {
+                unsafe {
+                    let _ = ShowWindow(hwnd_from(id), SW_SHOWNA);
+                }
+                n += 1;
+            }
+        }
+        let _ = std::fs::remove_file(recovery_file());
+    }
+    for id in top_level_windows() {
+        if facts_of(id).is_some_and(|f| f.cloaked) && Win32Platform::set_cloak(id, false) {
+            n += 1;
+        }
+    }
+    n
+}

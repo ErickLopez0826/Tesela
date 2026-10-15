@@ -5,9 +5,94 @@ pub mod domain;
 pub mod infrastructure;
 pub mod interface;
 
+use domain::manageable::Scope;
+
+/// Argumentos de línea de comandos (ver DECISIONS.md D-1 y D-3).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct CliArgs {
+    pub manage: Option<Scope>,
+    pub recover: bool,
+}
+
+pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<CliArgs, String> {
+    let mut out = CliArgs::default();
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--manage" => {
+                let v = it.next().ok_or("--manage necesita un alcance: all | prefix:TEXTO")?;
+                out.manage = Some(Scope::parse(&v).ok_or_else(|| format!("alcance inválido: {v}"))?);
+            }
+            "--recover" => out.recover = true,
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
 pub fn run() {
-    tauri::Builder::default()
+    let args = match parse_args(std::env::args().skip(1)) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("[wm] {e}");
+            std::process::exit(2);
+        }
+    };
+
+    #[cfg(windows)]
+    if args.recover {
+        let n = infrastructure::windows::platform::recover_cloaked_windows();
+        eprintln!("[wm] ventanas recuperadas: {n}");
+        return;
+    }
+
+    #[cfg(windows)]
+    let runtime = args.manage.clone().map(infrastructure::windows::runtime::Runtime::start);
+    #[cfg(windows)]
+    let runtime = std::sync::Mutex::new(runtime);
+
+    let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![interface::commands::list_windows])
-        .run(tauri::generate_context!())
-        .expect("error al ejecutar la aplicación");
+        .build(tauri::generate_context!())
+        .expect("error al construir la aplicación");
+
+    app.run(move |_app, event| {
+        if let tauri::RunEvent::Exit = event {
+            #[cfg(windows)]
+            if let Some(rt) = runtime.lock().unwrap().take() {
+                rt.stop();
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn a(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn sin_argumentos_no_gestiona() {
+        assert_eq!(parse_args(a(&[])).unwrap(), CliArgs::default());
+    }
+
+    #[test]
+    fn manage_con_prefijo() {
+        let r = parse_args(a(&["--manage", "prefix:WMTEST"])).unwrap();
+        assert_eq!(r.manage, Some(Scope::TitlePrefix("WMTEST".into())));
+    }
+
+    #[test]
+    fn manage_invalido_falla() {
+        assert!(parse_args(a(&["--manage", "xx"])).is_err());
+        assert!(parse_args(a(&["--manage"])).is_err());
+    }
+
+    #[test]
+    fn recover_se_reconoce() {
+        assert!(parse_args(a(&["--recover"])).unwrap().recover);
+    }
 }
