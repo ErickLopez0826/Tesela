@@ -1,23 +1,29 @@
 //! Hilos de ejecución del gestor: bucle de mensajes de Windows (hooks y atajos)
 //! y el hilo del controlador que decide y aplica.
 
+use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT,
+    RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN,
     VK_F12,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetMessageW, PostThreadMessageW, MSG, WINEVENT_OUTOFCONTEXT, WM_HOTKEY, WM_QUIT,
+    GetMessageW, PostThreadMessageW, MSG, WINEVENT_OUTOFCONTEXT, WM_APP, WM_HOTKEY, WM_QUIT,
 };
 
-use crate::application::controller::{Controller, Message};
+use crate::application::controller::{ConfigLoader, Controller, Message};
+use crate::domain::actions::Action;
+use crate::domain::config::ValidConfig;
+use crate::domain::desktop::Settings;
 use crate::domain::manageable::Scope;
+use crate::domain::shortcuts::{Chord, Keymap};
 use crate::infrastructure::windows::facts::id_of;
 use crate::infrastructure::windows::platform::Win32Platform;
 
@@ -30,9 +36,20 @@ const EVENT_OBJECT_SHOW: u32 = 0x8002;
 const EVENT_OBJECT_UNCLOAKED: u32 = 0x8018;
 
 const EMERGENCY_HOTKEY_ID: i32 = 1;
+const FIRST_BINDING_ID: i32 = 100;
+/// Mensaje al hilo de plataforma: reemplazar los atajos registrados (ver `HOTKEY_REQUEST`).
+pub const WM_APP_SET_HOTKEYS: u32 = WM_APP + 1;
 
 /// Emisor global para los callbacks de hooks (que no admiten estado propio).
 static EVENT_TX: Mutex<Option<Sender<Message>>> = Mutex::new(None);
+
+/// Petición pendiente de cambio de atajos, con el canal para devolver los que fallaron.
+pub struct HotkeyRequest {
+    pub bindings: Vec<(Chord, Action)>,
+    pub reply: Sender<Vec<String>>,
+}
+
+pub static HOTKEY_REQUEST: Mutex<Option<HotkeyRequest>> = Mutex::new(None);
 
 unsafe extern "system" fn win_event_proc(
     _hook: HWINEVENTHOOK,
@@ -61,6 +78,35 @@ unsafe extern "system" fn win_event_proc(
     }
 }
 
+pub struct RuntimeOptions {
+    pub scope: Scope,
+    pub settings: Settings,
+    pub keymap: Keymap,
+    pub loader: Option<ConfigLoader>,
+    /// Recibe los avisos para el usuario.
+    pub notice: Arc<dyn Fn(&str) + Send + Sync>,
+    /// Se llama si el usuario pide salir de la app (alt+shift+e).
+    pub on_exit: Box<dyn FnOnce() + Send>,
+}
+
+impl RuntimeOptions {
+    /// Sin atajos configurables ni avisos: para pruebas.
+    pub fn basic(scope: Scope) -> Self {
+        RuntimeOptions {
+            scope,
+            settings: Settings::default(),
+            keymap: Keymap::default(),
+            loader: None,
+            notice: Arc::new(|_| {}),
+            on_exit: Box::new(|| {}),
+        }
+    }
+
+    pub fn from_config(scope: Scope, config: ValidConfig) -> Self {
+        RuntimeOptions { settings: config.settings, keymap: config.keymap, ..Self::basic(scope) }
+    }
+}
+
 pub struct Runtime {
     tx: Sender<Message>,
     platform_thread_id: u32,
@@ -69,8 +115,13 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Arranca el gestor con el alcance indicado. Adopta las ventanas existentes dentro del alcance.
+    /// Arranca el gestor con el alcance indicado y sin atajos configurables (pruebas).
     pub fn start(scope: Scope) -> Runtime {
+        Self::start_with(RuntimeOptions::basic(scope))
+    }
+
+    /// Arranca el gestor. Adopta las ventanas existentes dentro del alcance.
+    pub fn start_with(options: RuntimeOptions) -> Runtime {
         let (tx, rx) = channel::<Message>();
         *EVENT_TX.lock().unwrap() = Some(tx.clone());
 
@@ -83,7 +134,7 @@ impl Runtime {
 
         let controller_thread = thread::Builder::new()
             .name("wm-controller".into())
-            .spawn(move || controller_loop(rx, scope))
+            .spawn(move || controller_loop(rx, platform_thread_id, options))
             .expect("hilo del controlador");
 
         Runtime {
@@ -126,14 +177,19 @@ impl Drop for Runtime {
     }
 }
 
-fn controller_loop(rx: Receiver<Message>, scope: Scope) {
+fn controller_loop(rx: Receiver<Message>, platform_thread_id: u32, options: RuntimeOptions) {
+    let RuntimeOptions { scope, settings, keymap, loader, notice, on_exit } = options;
+    let platform = Win32Platform::with_hotkeys(platform_thread_id, notice);
     // Si el controlador falla por un pánico, las ventanas ocultas se restauran antes de salir.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut controller = Controller::new(Win32Platform::new(), scope);
+        let mut controller = Controller::with_config(platform, scope, settings, keymap);
+        if let Some(l) = loader {
+            controller.set_loader(l);
+        }
         let guard = RestoreOnPanic(&mut controller);
         loop {
             // Cada 2 s se revisan los monitores (conectar/desconectar).
-            let msg = match rx.recv_timeout(std::time::Duration::from_secs(2)) {
+            let msg = match rx.recv_timeout(Duration::from_secs(2)) {
                 Ok(m) => m,
                 Err(RecvTimeoutError::Timeout) => Message::Tick,
                 Err(RecvTimeoutError::Disconnected) => break,
@@ -142,10 +198,14 @@ fn controller_loop(rx: Receiver<Message>, scope: Scope) {
                 break;
             }
         }
+        let requested = guard.0.exit_requested();
         std::mem::forget(guard);
+        requested
     }));
-    if result.is_err() {
-        eprintln!("[wm] el controlador falló; ventanas restauradas");
+    match result {
+        Ok(true) => on_exit(),
+        Ok(false) => {}
+        Err(_) => eprintln!("[wm] el controlador falló; ventanas restauradas"),
     }
 }
 
@@ -156,6 +216,23 @@ impl Drop for RestoreOnPanic<'_> {
     fn drop(&mut self) {
         self.0.handle(Message::Shutdown);
     }
+}
+
+fn modifiers_of(chord: &Chord) -> HOT_KEY_MODIFIERS {
+    let mut m = HOT_KEY_MODIFIERS(0);
+    if chord.mods.ctrl {
+        m |= MOD_CONTROL;
+    }
+    if chord.mods.alt {
+        m |= MOD_ALT;
+    }
+    if chord.mods.shift {
+        m |= MOD_SHIFT;
+    }
+    if chord.mods.win {
+        m |= MOD_WIN;
+    }
+    m
 }
 
 fn platform_loop(ready: Sender<u32>) {
@@ -181,15 +258,46 @@ fn platform_loop(ready: Sender<u32>) {
 
         let _ = ready.send(GetCurrentThreadId());
 
+        // id de hotkey -> acción, solo para los atajos configurables.
+        let mut actions: HashMap<i32, Action> = HashMap::new();
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-            if msg.message == WM_HOTKEY && msg.wParam.0 as i32 == EMERGENCY_HOTKEY_ID {
-                if let Some(tx) = EVENT_TX.lock().unwrap().as_ref() {
-                    let _ = tx.send(Message::Emergency);
+            match msg.message {
+                WM_HOTKEY => {
+                    let id = msg.wParam.0 as i32;
+                    let out = if id == EMERGENCY_HOTKEY_ID {
+                        Some(Message::Emergency)
+                    } else {
+                        actions.get(&id).map(|a| Message::Action(*a))
+                    };
+                    if let (Some(m), Some(tx)) = (out, EVENT_TX.lock().unwrap().as_ref()) {
+                        let _ = tx.send(m);
+                    }
                 }
+                WM_APP_SET_HOTKEYS => {
+                    let Some(req) = HOTKEY_REQUEST.lock().unwrap().take() else { continue };
+                    for id in actions.keys() {
+                        let _ = UnregisterHotKey(None, *id);
+                    }
+                    actions.clear();
+                    let mut failed = Vec::new();
+                    for (i, (chord, action)) in req.bindings.iter().enumerate() {
+                        let id = FIRST_BINDING_ID + i as i32;
+                        if RegisterHotKey(None, id, modifiers_of(chord), chord.key.virtual_key()).is_ok() {
+                            actions.insert(id, *action);
+                        } else {
+                            failed.push(chord.to_string());
+                        }
+                    }
+                    let _ = req.reply.send(failed);
+                }
+                _ => {}
             }
         }
 
+        for id in actions.keys() {
+            let _ = UnregisterHotKey(None, *id);
+        }
         if hotkey_ok {
             let _ = UnregisterHotKey(None, EMERGENCY_HOTKEY_ID);
         }

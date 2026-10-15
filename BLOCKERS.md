@@ -13,3 +13,6 @@ El plan (§12 Fase 1, §17) pide ocultar por workspace con cloak de DWM. `DwmSet
 
 ## B-3 Conflicto de atajos con GlazeWM
 GlazeWM sigue corriendo y ya registra `alt+h`, `alt+1`, etc. Dos programas no pueden registrar el mismo atajo global. Las pruebas de la Fase 3 usan un modificador distinto (configurable). Para usar la app en el día a día habrá que detener GlazeWM a mano (yo no lo detengo).
+
+## B-4 Redacción de §8.8
+"Dos atajos no pueden estar asignados a la misma acción" choca con "un atajo puede tener varias combinaciones, como ahora" (alt+h y alt+left hacen lo mismo). Implementé la lectura de §13: una *combinación* no puede ir a dos acciones. Conviene corregir la redacción en el plan.

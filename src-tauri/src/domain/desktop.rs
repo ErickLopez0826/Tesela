@@ -470,6 +470,20 @@ impl Desktop {
         if self.workspaces[ws].visible { self.place_fx(ws) } else { vec![] }
     }
 
+    /// Aplica una configuración nueva (recarga en caliente): layout, ejes y tamaño flotante.
+    /// Los workspaces conservan monitor y ventanas; las ligaduras solo valen para arranques nuevos.
+    pub fn update_settings(&mut self, settings: Settings) -> Vec<Effect> {
+        self.settings = settings;
+        self.ensure_visibility();
+        for i in 0..WORKSPACE_COUNT {
+            let rect = self.float_rect_for(i);
+            for id in self.workspaces[i].floating.clone() {
+                self.windows.get_mut(&id).unwrap().float_rect = Some(rect);
+            }
+        }
+        self.relayout_visible()
+    }
+
     /// El usuario soltó la ventana tras arrastrarla: se recoloca (§12 Fase 1).
     pub fn relayout(&mut self) -> Vec<Effect> {
         self.relayout_visible()
@@ -1189,6 +1203,20 @@ mod tests {
         d.add_window(1);
         assert_eq!(d.apply_action(&Action::CloseWindow), vec![Effect::Close(1)]);
         assert_eq!(d.apply_action(&Action::ToggleMinimize), vec![Effect::Minimize(1)]);
+    }
+
+    #[test]
+    fn recargar_ajustes_reacomoda_sin_perder_ventanas() {
+        let mut d = one();
+        d.add_window(1);
+        d.add_window(2);
+        let mut s = Settings::default();
+        s.layout.gaps = crate::domain::layout::Gaps::uniform(10, 10);
+        let fx = d.update_settings(s);
+        let p = placed(&fx);
+        assert_eq!(p.len(), 2);
+        assert_eq!(p[0].1.x, 10);
+        assert_eq!(d.windows_in(0), vec![1, 2]);
     }
 
     #[test]

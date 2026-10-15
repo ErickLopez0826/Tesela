@@ -1,16 +1,24 @@
 //! Implementación Win32 del puerto `WindowPlatform`.
 
 use std::collections::HashMap;
+use std::os::windows::process::CommandExt;
+use std::sync::mpsc::channel;
+use std::sync::Arc;
+use std::time::Duration;
 
 use windows::core::BOOL;
+use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE};
 use windows::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEINPUT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    IsIconic, IsZoomed, PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SW_MINIMIZE,
+    IsIconic, IsZoomed, PostMessageW, PostThreadMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SW_MINIMIZE,
     SWP_NOOWNERZORDER, SWP_NOZORDER, SW_HIDE, SW_RESTORE, SW_SHOWNA, WM_CLOSE,
 };
 
 use crate::application::ports::WindowPlatform;
+use crate::domain::actions::Action;
+use crate::domain::shortcuts::Chord;
+use crate::infrastructure::windows::runtime::{HotkeyRequest, HOTKEY_REQUEST, WM_APP_SET_HOTKEYS};
 use crate::domain::effects::{Effect, WindowId};
 use crate::domain::desktop::Monitor;
 use crate::domain::geometry::Rect;
@@ -30,6 +38,10 @@ pub enum HideMethod {
 
 #[derive(Default)]
 pub struct Win32Platform {
+    /// Hilo con el bucle de mensajes que registra los atajos (ver `runtime`).
+    hotkey_thread: Option<u32>,
+    /// Receptor de avisos para el usuario.
+    notice: Option<Arc<dyn Fn(&str) + Send + Sync>>,
     /// Posición original de cada ventana la primera vez que se toca.
     originals: HashMap<WindowId, Rect>,
     /// Ventanas ocultas y con qué método.
@@ -54,6 +66,10 @@ fn recovery_file() -> std::path::PathBuf {
 impl Win32Platform {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_hotkeys(thread_id: u32, notice: Arc<dyn Fn(&str) + Send + Sync>) -> Self {
+        Win32Platform { hotkey_thread: Some(thread_id), notice: Some(notice), ..Default::default() }
     }
 
     /// Guarda las ventanas ocultas para poder recuperarlas con `--recover` tras un cierre brusco (D-3).
@@ -222,6 +238,29 @@ impl WindowPlatform for Win32Platform {
         self.originals.remove(&id);
         if self.hidden.remove(&id).is_some() {
             self.persist_hidden();
+        }
+    }
+
+    fn set_hotkeys(&mut self, bindings: &[(Chord, Action)]) -> Vec<String> {
+        let Some(thread) = self.hotkey_thread else { return vec![] };
+        let (reply, rx) = channel();
+        *HOTKEY_REQUEST.lock().unwrap() = Some(HotkeyRequest { bindings: bindings.to_vec(), reply });
+        let posted = unsafe { PostThreadMessageW(thread, WM_APP_SET_HOTKEYS, WPARAM(0), LPARAM(0)) };
+        if posted.is_err() {
+            return bindings.iter().map(|(c, _)| c.to_string()).collect();
+        }
+        rx.recv_timeout(Duration::from_secs(3)).unwrap_or_default()
+    }
+
+    fn open_terminal(&mut self) {
+        // CREATE_NEW_CONSOLE
+        let _ = std::process::Command::new("cmd").creation_flags(0x0000_0010).spawn();
+    }
+
+    fn notify(&mut self, text: &str) {
+        eprintln!("[wm] {text}");
+        if let Some(n) = &self.notice {
+            n(text);
         }
     }
 

@@ -35,3 +35,12 @@ Decisiones tomadas durante el desarrollo autónomo. Las marcadas **(por defecto,
 - **D-14 Desconectar un monitor.** Sus workspaces pasan al principal (ocultos). Si el workspace estaba visible, sus ventanas se funden en el workspace visible del principal para que no queden ocultas. Al reconectar, los workspaces ligados vuelven a su monitor si estaban ocultos.
 - **D-15 Ventanas de prueba.** El script de pruebas se ejecuta con una copia de `powershell.exe` llamada `Lively.exe` para que las reglas `ignore` de GlazeWM (proceso Lively + clase HwndWrapper) no hagan que ambos gestores se peleen por ellas. No se toca la configuración de GlazeWM.
 - **D-16 Minimizar.** `alt+m` minimiza la ventana enfocada; si no hay enfocada, restaura la última minimizada. Una ventana minimizada sale del layout y vuelve a su columna al restaurarse.
+
+## Fase 3 (atajos y configuración)
+
+- **D-17 Archivo de configuración.** `%APPDATA%\window-manager\config.toml` (se crea con `src-tauri/default-config.toml` si no existe). Secciones `[layout]`, `[[workspace]]` y `[[keybinding]]` (acción, lista de combinaciones, modo opcional). Campos desconocidos se rechazan. Los valores por defecto de gaps (20 px, 60 px arriba) salen del `config.yaml` de GlazeWM (§16).
+- **D-18 Pausa.** `alt+shift+p` y el atajo de emergencia hacen lo mismo: restauran todas las ventanas, liberan todos los atajos salvo el de pausa y dejan de gestionar. Al reanudar se vuelve a adoptar lo que haya. Así una pausa nunca deja ventanas ocultas.
+- **D-19 Modo redimensionar.** Dentro del modo solo están registradas las teclas del modo (h/l/k/j, flechas, escape/enter), como en GlazeWM. Salir del modo restaura los atajos globales.
+- **D-20 Recarga.** `alt+shift+r` relee el archivo; si es inválido (TOML, tecla/acción desconocida o misma combinación en dos acciones) no cambia nada y avisa con todos los errores (§13).
+- **D-21 Interpretación de §8.8.** La regla "dos atajos no pueden estar asignados a la misma acción" contradice "un atajo puede tener varias combinaciones". Se implementó lo que pide §13: **una combinación no puede estar en dos acciones** dentro del mismo modo; una acción sí puede tener varias combinaciones.
+- **D-22 Avisos.** Los avisos al usuario se escriben en stderr y se emiten como evento `wm-notice` de Tauri. La interfaz que los muestre llega con la barra (Fase 5).

@@ -6,6 +6,8 @@ pub mod infrastructure;
 pub mod interface;
 
 use domain::manageable::Scope;
+#[allow(unused_imports)]
+use tauri::Manager;
 
 /// Argumentos de línea de comandos (ver DECISIONS.md D-1 y D-3).
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -30,6 +32,10 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<CliArgs, St
     Ok(out)
 }
 
+/// Guarda el gestor en marcha para detenerlo al cerrar la app.
+#[cfg(windows)]
+struct ManagerState(std::sync::Mutex<Option<infrastructure::windows::runtime::Runtime>>);
+
 pub fn run() {
     let args = match parse_args(std::env::args().skip(1)) {
         Ok(a) => a,
@@ -46,21 +52,48 @@ pub fn run() {
         return;
     }
 
-    #[cfg(windows)]
-    let runtime = args.manage.clone().map(infrastructure::windows::runtime::Runtime::start);
-    #[cfg(windows)]
-    let runtime = std::sync::Mutex::new(runtime);
-
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![interface::commands::list_windows])
+        .setup(move |app| {
+            #[cfg(windows)]
+            if let Some(scope) = args.manage.clone() {
+                use std::sync::Arc;
+                use tauri::Emitter;
+
+                let handle = app.handle().clone();
+                let notice: Arc<dyn Fn(&str) + Send + Sync> = {
+                    let h = handle.clone();
+                    Arc::new(move |text: &str| {
+                        let _ = h.emit("wm-notice", text.to_string());
+                    })
+                };
+                let (config, warning) = infrastructure::config_file::load_or_create();
+                if let Some(w) = warning {
+                    eprintln!("[wm] {w}");
+                    notice(&w);
+                }
+                let options = infrastructure::windows::runtime::RuntimeOptions {
+                    loader: Some(Box::new(infrastructure::config_file::load_file)),
+                    notice,
+                    on_exit: Box::new(move || handle.exit(0)),
+                    ..infrastructure::windows::runtime::RuntimeOptions::from_config(scope, config)
+                };
+                let runtime = infrastructure::windows::runtime::Runtime::start_with(options);
+                app.manage(ManagerState(std::sync::Mutex::new(Some(runtime))));
+            }
+            let _ = &app;
+            Ok(())
+        })
         .build(tauri::generate_context!())
         .expect("error al construir la aplicación");
 
-    app.run(move |_app, event| {
+    app.run(|_app, event| {
         if let tauri::RunEvent::Exit = event {
             #[cfg(windows)]
-            if let Some(rt) = runtime.lock().unwrap().take() {
-                rt.stop();
+            if let Some(state) = _app.try_state::<ManagerState>() {
+                if let Some(rt) = state.0.lock().unwrap().take() {
+                    rt.stop();
+                }
             }
         }
     });

@@ -1,0 +1,227 @@
+# Configuración de Window Manager.
+# Se lee al arrancar y al recargar con alt+shift+r. Si tiene errores, se conserva la anterior.
+# Los atajos son los del config.yaml de GlazeWM (sección 8 del plan), sin cambios.
+
+[layout]
+min_column_width = 200
+min_window_height = 120
+inner_gap = 20
+outer_top = 60        # espacio para la barra superior
+outer_right = 20
+outer_bottom = 20
+outer_left = 20
+horizontal_axis = "columns"
+vertical_axis = "rows"   # monitores verticales: "rows" por defecto (DECISIONS.md)
+float_width = 0.6
+float_height = 0.7
+
+# Workspaces ligados a monitores (0 = el de más a la izquierda).
+[[workspace]]
+name = "1"
+monitor = 0
+[[workspace]]
+name = "2"
+monitor = 0
+[[workspace]]
+name = "3"
+monitor = 0
+[[workspace]]
+name = "4"
+monitor = 0
+[[workspace]]
+name = "5"
+monitor = 1
+[[workspace]]
+name = "6"
+monitor = 1
+[[workspace]]
+name = "7"
+monitor = 1
+[[workspace]]
+name = "8"
+[[workspace]]
+name = "9"
+
+# 8.1 Foco
+[[keybinding]]
+action = "focus_left"
+keys = ["alt+h", "alt+left"]
+[[keybinding]]
+action = "focus_right"
+keys = ["alt+l", "alt+right"]
+[[keybinding]]
+action = "focus_up"
+keys = ["alt+k", "alt+up"]
+[[keybinding]]
+action = "focus_down"
+keys = ["alt+j", "alt+down"]
+
+# 8.2 Mover ventana
+[[keybinding]]
+action = "move_left"
+keys = ["alt+shift+h", "alt+shift+left"]
+[[keybinding]]
+action = "move_right"
+keys = ["alt+shift+l", "alt+shift+right"]
+[[keybinding]]
+action = "move_up"
+keys = ["alt+shift+k", "alt+shift+up"]
+[[keybinding]]
+action = "move_down"
+keys = ["alt+shift+j", "alt+shift+down"]
+
+# 8.3 Redimensionar
+[[keybinding]]
+action = "resize_width_-2"
+keys = ["alt+u"]
+[[keybinding]]
+action = "resize_width_+2"
+keys = ["alt+p"]
+[[keybinding]]
+action = "resize_height_+2"
+keys = ["alt+o"]
+[[keybinding]]
+action = "resize_height_-2"
+keys = ["alt+i"]
+
+# 8.4 Modo redimensionar
+[[keybinding]]
+action = "resize_mode"
+keys = ["alt+r"]
+[[keybinding]]
+mode = "resize"
+action = "resize_width_-2"
+keys = ["h", "left"]
+[[keybinding]]
+mode = "resize"
+action = "resize_width_+2"
+keys = ["l", "right"]
+[[keybinding]]
+mode = "resize"
+action = "resize_height_+2"
+keys = ["k", "up"]
+[[keybinding]]
+mode = "resize"
+action = "resize_height_-2"
+keys = ["j", "down"]
+[[keybinding]]
+mode = "resize"
+action = "exit_resize_mode"
+keys = ["escape", "enter"]
+
+# 8.5 Workspaces
+[[keybinding]]
+action = "workspace_1"
+keys = ["alt+1"]
+[[keybinding]]
+action = "workspace_2"
+keys = ["alt+2"]
+[[keybinding]]
+action = "workspace_3"
+keys = ["alt+3"]
+[[keybinding]]
+action = "workspace_4"
+keys = ["alt+4"]
+[[keybinding]]
+action = "workspace_5"
+keys = ["alt+5"]
+[[keybinding]]
+action = "workspace_6"
+keys = ["alt+6"]
+[[keybinding]]
+action = "workspace_7"
+keys = ["alt+7"]
+[[keybinding]]
+action = "workspace_8"
+keys = ["alt+8"]
+[[keybinding]]
+action = "workspace_9"
+keys = ["alt+9"]
+[[keybinding]]
+action = "move_to_workspace_1"
+keys = ["alt+shift+1"]
+[[keybinding]]
+action = "move_to_workspace_2"
+keys = ["alt+shift+2"]
+[[keybinding]]
+action = "move_to_workspace_3"
+keys = ["alt+shift+3"]
+[[keybinding]]
+action = "move_to_workspace_4"
+keys = ["alt+shift+4"]
+[[keybinding]]
+action = "move_to_workspace_5"
+keys = ["alt+shift+5"]
+[[keybinding]]
+action = "move_to_workspace_6"
+keys = ["alt+shift+6"]
+[[keybinding]]
+action = "move_to_workspace_7"
+keys = ["alt+shift+7"]
+[[keybinding]]
+action = "move_to_workspace_8"
+keys = ["alt+shift+8"]
+[[keybinding]]
+action = "move_to_workspace_9"
+keys = ["alt+shift+9"]
+[[keybinding]]
+action = "next_workspace"
+keys = ["alt+s"]
+[[keybinding]]
+action = "prev_workspace"
+keys = ["alt+a"]
+[[keybinding]]
+action = "recent_workspace"
+keys = ["alt+d"]
+[[keybinding]]
+action = "move_workspace_left"
+keys = ["alt+shift+a"]
+[[keybinding]]
+action = "move_workspace_right"
+keys = ["alt+shift+f"]
+[[keybinding]]
+action = "move_workspace_up"
+keys = ["alt+shift+d"]
+[[keybinding]]
+action = "move_workspace_down"
+keys = ["alt+shift+s"]
+
+# 8.6 Ventana
+[[keybinding]]
+action = "toggle_stack"
+keys = ["alt+v"]
+[[keybinding]]
+action = "toggle_floating"
+keys = ["alt+t"]
+[[keybinding]]
+action = "toggle_fullscreen"
+keys = ["alt+f"]
+[[keybinding]]
+action = "toggle_minimize"
+keys = ["alt+m"]
+[[keybinding]]
+action = "toggle_floating_centered"
+keys = ["alt+shift+space"]
+[[keybinding]]
+action = "close_window"
+keys = ["alt+shift+q"]
+[[keybinding]]
+action = "cycle_focus"
+keys = ["alt+space"]
+
+# 8.7 Sistema
+[[keybinding]]
+action = "open_terminal"
+keys = ["alt+enter"]
+[[keybinding]]
+action = "toggle_pause"
+keys = ["alt+shift+p"]
+[[keybinding]]
+action = "reload_config"
+keys = ["alt+shift+r"]
+[[keybinding]]
+action = "redraw"
+keys = ["alt+shift+w"]
+[[keybinding]]
+action = "exit"
+keys = ["alt+shift+e"]

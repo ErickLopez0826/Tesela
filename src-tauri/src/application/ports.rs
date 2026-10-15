@@ -1,6 +1,8 @@
+use crate::domain::actions::Action;
 use crate::domain::desktop::Monitor;
 use crate::domain::effects::{Effect, WindowId};
 use crate::domain::manageable::WindowFacts;
+use crate::domain::shortcuts::Chord;
 use crate::domain::window::WindowCandidate;
 
 /// Puerto: fuente de ventanas del sistema.
@@ -21,4 +23,10 @@ pub trait WindowPlatform {
     fn forget(&mut self, id: WindowId);
     /// Devuelve cada ventana tocada a su posición original y la muestra.
     fn restore_all(&mut self);
+    /// Reemplaza los atajos globales registrados. Devuelve las combinaciones que no se pudieron registrar.
+    fn set_hotkeys(&mut self, bindings: &[(Chord, Action)]) -> Vec<String>;
+    /// Abre una terminal (alt+enter).
+    fn open_terminal(&mut self);
+    /// Avisa al usuario (registro y, si hay interfaz, un aviso en pantalla).
+    fn notify(&mut self, text: &str);
 }

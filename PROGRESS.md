@@ -25,3 +25,11 @@ Cómo ejecutar la prueba real: `cargo test --test phase1_windows -- --ignored --
 - ✅ Estados de ventana gestionada/flotante/minimizada con vuelta a su posición (§7).
 - ✅ Criterio "todas las reglas de la sección 5 pasan sus pruebas": cada caso de las secciones "Layout" y "Monitores" de §13 tiene su prueba en `domain::layout` y `domain::desktop` (Desktop con dos monitores, mover workspace entre monitores, desconectar monitor).
 - Sin ventanas reales: el dominio se prueba con datos puros. La prueba real de la Fase 1 sigue pasando con el nuevo Desktop.
+
+## Fase 3: Atajos y configuración ✅
+- ✅ Atajos cargados desde `config.toml` editable (TOML); creado con valores por defecto si falta.
+- ✅ Todos los atajos de la sección 8 migrados (58 globales + 10 del modo redimensionar). Una prueba compara el archivo por defecto contra la lista de la sección 8 escrita aparte (ni más ni menos).
+- ✅ Recarga en caliente con `alt+shift+r`; con configuración inválida conserva la anterior y avisa (probado con teclas reales).
+- ✅ Criterio "cada atajo de la sección 8 ejecuta su acción correcta": `cada_atajo_global_de_la_seccion_8_ejecuta_su_accion` pulsa cada combinación registrada en un escritorio de 3 monitores y comprueba que cambia el estado. Prueba real con teclas inyectadas en `tests/phase3_hotkeys.rs` (usa Ctrl+Alt+F<n> y F13/F14 para no chocar con GlazeWM, que sigue corriendo y ya tiene alt+...).
+- 🟡 Excepción: `alt+f` (pantalla completa) se implementa en la Fase 4.
+- Atajos con `alt+...` reales **no se pudieron probar contra el sistema** mientras GlazeWM siga corriendo (B-3); la lógica es idéntica porque solo cambia el texto de la combinación.
