@@ -1,10 +1,16 @@
 use crate::domain::actions::Action;
 use crate::domain::desktop::Monitor;
-use crate::domain::effects::{Effect, WindowId};
+use crate::domain::effects::{Effect, Transition, WindowId};
 use crate::domain::manageable::WindowFacts;
 use crate::domain::shortcuts::Chord;
 use crate::domain::snapshot::{StateSnapshot, SystemStats};
 use crate::domain::window::WindowCandidate;
+
+/// Prefijo del error al aplicar un efecto cuando Windows no deja mover la ventana (programa con más privilegios).
+pub const DENIED: &str = "acceso denegado";
+
+/// Lo que la plataforma devuelve al empezar una animación de cambio de workspace; se entrega a `slide_end` para cerrarla.
+pub struct SlideHandle(pub Box<dyn std::any::Any + Send>);
 
 /// Puerto: fuente de ventanas del sistema.
 pub trait WindowEnumerator {
@@ -41,4 +47,12 @@ pub trait WindowPlatform {
     fn toggle_panel(&mut self, monitor: u32);
     /// Avisa al usuario (registro y, si hay interfaz, un aviso en pantalla).
     fn notify(&mut self, text: &str);
+    /// Anima el cambio de workspace (las ventanas que salen suben, las que entran bajan). Vuelve cuando la animación
+    /// llega al final, con las ventanas viejas ya ocultas y las nuevas aún sin mostrar; el controlador aplica entonces
+    /// el resto de efectos y llama a `slide_end`. `None`: sin animación (el cambio se hace como siempre).
+    fn slide_begin(&mut self, _transition: &Transition) -> Option<SlideHandle> {
+        None
+    }
+    /// Retira lo que dibujó `slide_begin`, ya con las ventanas reales en su sitio.
+    fn slide_end(&mut self, _handle: SlideHandle) {}
 }

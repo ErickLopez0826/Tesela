@@ -38,3 +38,25 @@ describe("createPollingStore", () => {
     expect(get(store)).toBe("ok");
   });
 });
+
+describe("createPollingStore con la ventana oculta", () => {
+  const setVisibility = (v: "hidden" | "visible") => Object.defineProperty(document, "visibilityState", { configurable: true, get: () => v });
+  afterEach(() => setVisibility("visible"));
+
+  it("no consulta mientras está oculta y lee enseguida al volver a mostrarse", async () => {
+    vi.useFakeTimers();
+    let n = 0;
+    const store = createPollingStore(async () => ++n, 1000);
+    store.start(); // lectura inicial: 1
+    await vi.advanceTimersByTimeAsync(10);
+    expect(get(store)).toBe(1);
+    setVisibility("hidden");
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(get(store)).toBe(1);
+    setVisibility("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(get(store)).toBe(2);
+    store.stop();
+  });
+});

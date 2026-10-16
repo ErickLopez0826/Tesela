@@ -5,8 +5,8 @@
 //! Se ejecuta a mano: `cargo test --test phase6_services -- --ignored --nocapture --test-threads=1`
 #![cfg(windows)]
 
-use window_manager_lib::domain::system::{PowerAction, RadioKind};
-use window_manager_lib::infrastructure::windows::system::build_services;
+use tesela_lib::domain::system::{PowerAction, RadioKind};
+use tesela_lib::infrastructure::windows::system::build_services;
 
 #[test]
 #[ignore]

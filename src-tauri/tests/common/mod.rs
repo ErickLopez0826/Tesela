@@ -9,8 +9,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::channel;
 use std::time::{Duration, Instant};
 
-use window_manager_lib::domain::geometry::Rect;
-use window_manager_lib::infrastructure::windows::facts::{facts_of, visible_frame, window_rect};
+use tesela_lib::domain::geometry::Rect;
+use tesela_lib::infrastructure::windows::facts::{facts_of, visible_frame, window_rect};
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_CONTROL,
@@ -113,7 +113,7 @@ pub fn ctrl_alt_f(n: u16) {
 
 /// Mueve una ventana (de otro proceso) a un rectángulo exacto, sin compensar sombras.
 pub fn force_rect(id: isize, r: Rect) {
-    use window_manager_lib::infrastructure::windows::facts::hwnd_from;
+    use tesela_lib::infrastructure::windows::facts::hwnd_from;
     use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
     unsafe {
         let _ = SetWindowPos(hwnd_from(id), None, r.x, r.y, r.w, r.h, SWP_NOZORDER | SWP_NOACTIVATE);

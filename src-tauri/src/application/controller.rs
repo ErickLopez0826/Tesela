@@ -1,6 +1,6 @@
 //! Controlador: traduce eventos, atajos y comandos en cambios del `Desktop` y los aplica a la plataforma.
 
-use crate::application::ports::WindowPlatform;
+use crate::application::ports::{WindowPlatform, DENIED};
 use crate::domain::actions::Action;
 use crate::domain::config::ValidConfig;
 use crate::domain::desktop::{Desktop, Settings, TrackOptions};
@@ -105,6 +105,11 @@ impl<P: WindowPlatform> Controller<P> {
         &self.platform
     }
 
+    #[cfg(test)]
+    pub fn platform_mut(&mut self) -> &mut P {
+        &mut self.platform
+    }
+
     pub fn is_paused(&self) -> bool {
         self.paused
     }
@@ -186,6 +191,19 @@ impl<P: WindowPlatform> Controller<P> {
         }
     }
 
+    /// Suelta las ventanas que deberían verse pero Windows ya oculta (apps que se esconden en la bandeja, ventanas
+    /// ocultas por el sistema al cambiar de escritorio virtual...): sin esto dejan un hueco invisible en el mosaico.
+    /// Si vuelven a mostrarse llega su evento y se incorporan de nuevo.
+    fn drop_ghost_windows(&mut self) {
+        for id in self.desk.shown_windows() {
+            let Some(facts) = self.platform.facts(id) else { continue };
+            if !facts.visible || facts.cloaked {
+                let fx = self.desk.remove_window(id);
+                self.run(fx);
+            }
+        }
+    }
+
     /// Reevalúa todas las ventanas con la lista de exclusiones actual.
     fn reapply_exclusions(&mut self) {
         for id in self.desk.all_windows() {
@@ -197,9 +215,34 @@ impl<P: WindowPlatform> Controller<P> {
     }
 
     fn run(&mut self, effects: Vec<Effect>) {
-        for e in &effects {
-            if let Err(err) = self.platform.apply(e) {
-                eprintln!("[wm] no se pudo aplicar {e:?}: {err}");
+        let mut handle = None;
+        let effects = match self.desk.take_transition() {
+            Some(t) => {
+                // Las ventanas que entran se colocan ya (siguen ocultas): la animación las dibuja en su sitio final.
+                let (early, rest): (Vec<Effect>, Vec<Effect>) =
+                    effects.into_iter().partition(|e| matches!(e, Effect::Place { id, .. } if t.inn.contains(id)));
+                self.drain(early.into());
+                handle = self.platform.slide_begin(&t);
+                rest
+            }
+            None => effects,
+        };
+        self.drain(effects.into());
+        if let Some(h) = handle {
+            self.platform.slide_end(h);
+        }
+    }
+
+    fn drain(&mut self, mut queue: std::collections::VecDeque<Effect>) {
+        while let Some(e) = queue.pop_front() {
+            let Err(err) = self.platform.apply(&e) else { continue };
+            eprintln!("[wm] no se pudo aplicar {e:?}: {err}");
+            // Una ventana que Windows no deja mover (p. ej. el Administrador de tareas, que corre con más
+            // privilegios) no puede ocupar un hueco del mosaico: se excluye y el resto se reparte sin ella.
+            if let (Effect::Place { id, .. }, true) = (&e, err.starts_with(DENIED)) {
+                let title = self.platform.facts(*id).map(|f| f.title).unwrap_or_default();
+                self.platform.notify(&format!("«{title}» no se puede mover (¿se ejecuta como administrador?): se deja fuera del mosaico."));
+                queue.extend(self.desk.set_excluded(*id, true));
             }
         }
     }
@@ -352,6 +395,7 @@ impl<P: WindowPlatform> Controller<P> {
             Message::Tick => {
                 self.check_monitors();
                 self.check_fullscreen();
+                self.drop_ghost_windows();
             }
         }
         self.sync_bar();
@@ -394,6 +438,12 @@ pub mod fake {
         pub minimize_log: Vec<WindowId>,
         /// Combinaciones que el sistema "rechaza" al registrar (simula otro programa que las usa).
         pub reject: Vec<String>,
+        /// Ventanas que el sistema "no deja mover" (simula programas con más privilegios).
+        pub deny_move: Vec<WindowId>,
+        /// Si `true`, `slide_begin` simula una animación y deja constancia en `slide_log`.
+        pub slide_enabled: bool,
+        /// «begin salen=[ocultas] entran=[ocultas]» y «end»: el estado de las ventanas en cada momento.
+        pub slide_log: Vec<String>,
     }
 
     impl FakePlatform {
@@ -412,6 +462,9 @@ pub mod fake {
                 panel_log: vec![],
                 minimize_log: vec![],
                 reject: vec![],
+                deny_move: vec![],
+                slide_enabled: false,
+                slide_log: vec![],
             }
         }
 
@@ -456,6 +509,9 @@ pub mod fake {
             self.apply_count += 1;
             match e {
                 Effect::Place { id, rect } => {
+                    if self.deny_move.contains(id) {
+                        return Err(format!("{}: simulado", crate::application::ports::DENIED));
+                    }
                     let w = self.windows.get_mut(id).ok_or("no existe")?;
                     if !w.touched {
                         w.original = w.rect;
@@ -504,6 +560,18 @@ pub mod fake {
         fn notify(&mut self, text: &str) {
             self.notices.push(text.to_string());
         }
+        fn slide_begin(&mut self, t: &crate::domain::effects::Transition) -> Option<crate::application::ports::SlideHandle> {
+            if !self.slide_enabled {
+                return None;
+            }
+            let hidden = |ids: &[WindowId]| ids.iter().map(|id| self.windows[id].hidden).collect::<Vec<_>>();
+            let line = format!("begin salen_ocultas={:?} entran_ocultas={:?}", hidden(&t.out), hidden(&t.inn));
+            self.slide_log.push(line);
+            Some(crate::application::ports::SlideHandle(Box::new(())))
+        }
+        fn slide_end(&mut self, _h: crate::application::ports::SlideHandle) {
+            self.slide_log.push("end".into());
+        }
     }
 }
 
@@ -540,6 +608,53 @@ mod tests {
                 None => {}
             }
         }
+    }
+
+    #[test]
+    fn cambiar_de_workspace_anima_con_las_viejas_visibles_y_las_nuevas_ocultas_y_retira_al_final() {
+        let mut p = FakePlatform::new();
+        p.slide_enabled = true;
+        p.spawn(1, "WMTEST 1");
+        let mut c = Controller::new(p, Scope::TitlePrefix("WMTEST".into()));
+        act(&mut c, Action::MoveToWorkspace(2)); // la ventana se va al 2 y la app la sigue
+        act(&mut c, Action::FocusWorkspace(1)); // el 1 está vacío: solo sale la ventana
+        assert_eq!(c.platform().slide_log.last().map(String::as_str), Some("end"));
+        assert!(c.platform().slide_log.iter().any(|l| l == "begin salen_ocultas=[false] entran_ocultas=[]"), "{:?}", c.platform().slide_log);
+        c.platform_mut().slide_log.clear();
+        act(&mut c, Action::FocusWorkspace(2)); // vuelve: solo entra
+        assert_eq!(
+            c.platform().slide_log,
+            vec!["begin salen_ocultas=[] entran_ocultas=[true]".to_string(), "end".to_string()],
+            "al empezar la entrante aún está oculta; al acabar se retira la capa"
+        );
+        assert!(!c.platform().windows[&1].hidden, "al final la ventana nueva se ve");
+        assert_no_lost_windows(&c);
+    }
+
+    #[test]
+    fn con_salientes_y_entrantes_las_viejas_siguen_visibles_al_empezar() {
+        let mut p = FakePlatform::new();
+        p.slide_enabled = true;
+        p.spawn(1, "WMTEST 1");
+        p.spawn(2, "WMTEST 2");
+        let mut c = Controller::new(p, Scope::TitlePrefix("WMTEST".into()));
+        act(&mut c, Action::MoveToWorkspace(2)); // la enfocada se va al 2; la otra se queda en el 1
+        c.platform_mut().slide_log.clear();
+        act(&mut c, Action::FocusWorkspace(1));
+        assert_eq!(
+            c.platform().slide_log,
+            vec!["begin salen_ocultas=[false] entran_ocultas=[true]".to_string(), "end".to_string()]
+        );
+        assert_no_lost_windows(&c);
+    }
+
+    #[test]
+    fn sin_animacion_disponible_el_cambio_se_hace_igual() {
+        let mut c = ctl_with(2); // el doble no anima por defecto
+        act(&mut c, Action::MoveToWorkspace(2));
+        act(&mut c, Action::FocusWorkspace(2));
+        assert!(c.platform().slide_log.is_empty());
+        assert_no_lost_windows(&c);
     }
 
     #[test]
@@ -782,9 +897,11 @@ mod tests {
         use crate::domain::layout::{Dir, Orientation};
         match *action {
             Action::FocusDir(Dir::Right) | Action::MoveDir(Dir::Right) => vec![Action::FocusDir(Dir::Left)],
-            Action::FocusDir(Dir::Up) | Action::MoveDir(Dir::Up) => vec![Action::MoveDir(Dir::Left)],
-            Action::FocusDir(Dir::Down) | Action::MoveDir(Dir::Down) => vec![Action::MoveDir(Dir::Left), Action::FocusDir(Dir::Up)],
-            Action::Resize { orientation: Orientation::Y, .. } | Action::ToggleStack => vec![Action::MoveDir(Dir::Left)],
+            // Hay un monitor debajo pero ninguno encima: subir apila la ventana sobre su vecina.
+            Action::FocusDir(Dir::Up) => vec![Action::MoveDir(Dir::Up), Action::FocusDir(Dir::Down)],
+            Action::MoveDir(Dir::Up) => vec![],
+            Action::FocusDir(Dir::Down) | Action::MoveDir(Dir::Down) => vec![Action::MoveDir(Dir::Up)],
+            Action::Resize { orientation: Orientation::Y, .. } | Action::ToggleStack => vec![Action::MoveDir(Dir::Up)],
             Action::FocusWorkspace(1)
             | Action::NextWorkspace
             | Action::PrevWorkspace
@@ -848,6 +965,55 @@ mod tests {
             checked += 1;
         }
         assert!(checked >= 58, "se comprobaron {checked} atajos");
+    }
+
+    /// Caso real: mover Google al segundo monitor y volver a pulsar en esa dirección no debe arrastrar a otra ventana.
+    #[test]
+    fn mover_a_otro_monitor_y_repetir_no_arrastra_a_otra_ventana() {
+        use crate::domain::desktop::Monitor;
+        use crate::domain::geometry::Rect;
+        use crate::domain::layout::Dir;
+        let mut p = FakePlatform::new();
+        p.monitors = vec![
+            Monitor::new(0, Rect::new(0, 0, 1000, 600), true),
+            Monitor::new(1, Rect::new(1000, 0, 1000, 600), true),
+        ];
+        p.spawn(1, "WMTEST vscode");
+        p.spawn(2, "WMTEST google");
+        let mut c = Controller::new(p, Scope::TitlePrefix("WMTEST".into()));
+        c.handle(Message::Focused(2));
+        // Hasta llegar al tope derecho del monitor 1 y cruzar al 2.
+        for _ in 0..3 {
+            act(&mut c, Action::MoveDir(Dir::Right));
+        }
+        c.handle(Message::Focused(2)); // el sistema confirma el foco de la ventana movida
+        let on_second = c.platform().windows[&2].rect.x >= 1000;
+        assert!(on_second, "la ventana movida está en el segundo monitor");
+        let focus_before = c.platform().focus_log.len();
+        act(&mut c, Action::MoveDir(Dir::Right));
+        act(&mut c, Action::MoveDir(Dir::Right));
+        assert!(c.platform().windows[&1].rect.x < 1000, "la otra ventana se queda en su monitor");
+        assert!(c.platform().windows[&2].rect.x >= 1000);
+        assert_eq!(c.platform().focus_log.len(), focus_before, "no hay más cambios de foco");
+    }
+
+    #[test]
+    fn una_ventana_que_windows_oculta_no_deja_un_hueco_vacio() {
+        let mut p = FakePlatform::new();
+        p.spawn(1, "WMTEST uno");
+        p.spawn(2, "WMTEST dos");
+        let mut c = Controller::new(p, Scope::TitlePrefix("WMTEST".into()));
+        assert!(c.desktop().entry(2).is_some());
+        // La app se esconde en la bandeja sin destruir la ventana.
+        c.platform.windows.get_mut(&2).unwrap().facts.visible = false;
+        c.handle(Message::Tick);
+        assert!(c.desktop().entry(2).is_none(), "ya no ocupa sitio");
+        let area = c.platform().monitors[0].work_area;
+        assert!(c.platform().windows[&1].rect.w >= area.w - 40, "la otra ocupa todo el ancho");
+        // Al volver a mostrarse regresa al mosaico.
+        c.platform.windows.get_mut(&2).unwrap().facts.visible = true;
+        c.handle(Message::Opened(2));
+        assert!(c.desktop().entry(2).is_some());
     }
 
     // ---------- Fase 4: exclusiones y pantalla completa ----------
@@ -946,6 +1112,21 @@ mod tests {
         c.handle(Message::Focused(1));
         act(&mut c, Action::CloseWindow);
         assert_eq!(c.platform().closed, vec![1]);
+    }
+
+    #[test]
+    fn una_ventana_que_no_se_puede_mover_no_ocupa_hueco() {
+        let mut p = FakePlatform::new();
+        p.spawn(1, "WMTEST a");
+        p.spawn(2, "WMTEST administrador");
+        p.spawn(3, "WMTEST b");
+        p.deny_move.push(2);
+        let mut c = Controller::new(p, Scope::TitlePrefix("WMTEST".into()));
+        // La ventana intocable se excluye y las otras dos se reparten el ancho entera.
+        let (a, b) = (c.platform().windows[&1].rect, c.platform().windows[&3].rect);
+        assert_eq!(a.w + b.w, c.platform().monitors[0].work_area.w);
+        assert!(c.platform().notices.iter().any(|n| n.contains("no se puede mover")));
+        c.handle(Message::Opened(3));
     }
 
     #[test]

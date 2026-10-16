@@ -9,7 +9,7 @@ npm install
 npm run tauri build          # genera el instalador NSIS (usa la configuración de src-tauri/tauri.conf.json)
 ```
 
-Resultado: `src-tauri\target\release\bundle\nsis\Window Manager_0.1.0_x64-setup.exe`.
+Resultado: `src-tauri\target\release\bundle\nsis\Tesela_0.1.0_x64-setup.exe`.
 
 - Instala **por usuario**, sin permisos de administrador (`installMode: currentUser`) y en español.
 - Incluye la carpeta `modules\` (notas, apps, portapapeles, velocidad, pareja y el ejemplo) en los recursos de la app; la
@@ -25,8 +25,8 @@ Resultado: `src-tauri\target\release\bundle\nsis\Window Manager_0.1.0_x64-setup.
 
 Pestaña **General** → «Iniciar la app al entrar en Windows». Escribe un valor en
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (sin administrador) con la línea
-`"<ruta>\window-manager.exe" --manage all --bar`. Para quitarlo: desmarcar la casilla, o
-`reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v WindowManager /f`.
+`"<ruta>\tesela.exe" --manage all --bar`. Para quitarlo: desmarcar la casilla, o
+`reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Tesela /f`.
 
 **Importante:** no está activado en tu equipo. Y **desactiva el arranque de GlazeWM antes** (sin desinstalarlo): dos gestores a la
 vez se pelean por las ventanas y por los atajos (GlazeWM ya tiene registrados `alt+…`).
@@ -36,7 +36,7 @@ vez se pelean por las ventanas y por los atajos (GlazeWM ya tiene registrados `a
 1. Cierra GlazeWM (`alt+shift+e` en GlazeWM) y quítalo del arranque; **no lo desinstales**, es tu respaldo.
 2. Abre la app → pestaña **General** → «Activar gestor de ventanas y barra…» (te avisa de que reorganizará todas las ventanas).
 3. Si algo va mal: `Ctrl+Alt+Shift+F12` devuelve todas las ventanas a su sitio y pausa el gestor. Si la app se cerró de golpe y
-   quedaron ventanas ocultas: `window-manager.exe --recover`.
+   quedaron ventanas ocultas: `tesela.exe --recover`.
 4. Para volver a GlazeWM: cierra esta app y ábrelo.
 
 ## 4. Actualizaciones (no conectadas todavía)
@@ -45,7 +45,7 @@ La app trae el código listo detrás de una opción de compilación (`--features
 solo tú puedes poner:
 
 1. **Clave de firma del actualizador** (secreta, fuera del repositorio):
-   `npx tauri signer generate -w "$env:USERPROFILE\.tauri\window-manager.key"`
+   `npx tauri signer generate -w "$env:USERPROFILE\.tauri\tesela.key"`
 2. En `src-tauri/tauri.conf.json` añadir:
    ```json
    "bundle": { "createUpdaterArtifacts": true },

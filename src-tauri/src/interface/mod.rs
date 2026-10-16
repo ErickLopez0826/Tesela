@@ -3,5 +3,8 @@
 #[cfg(windows)]
 pub mod bar;
 pub mod commands;
+pub mod focus_border;
 pub mod modules_protocol;
+pub mod tray;
 pub mod updates;
+pub mod webview;

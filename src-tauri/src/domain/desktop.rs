@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use crate::domain::actions::Action;
-use crate::domain::effects::{Effect, WindowId};
+use crate::domain::effects::{Effect, Transition, WindowId};
 use crate::domain::geometry::Rect;
 use crate::domain::snapshot::{MonitorSnapshot, WorkspaceSnapshot};
 use crate::domain::layout::{focus_neighbor, Axis, Dir, Layout, LayoutSettings, NoRoom, Orientation};
@@ -50,6 +50,8 @@ pub struct Settings {
     pub bindings: [Option<usize>; WORKSPACE_COUNT],
     /// Tamaño de una ventana flotante centrada, como fracción del área útil.
     pub float_size: (f64, f64),
+    /// Anotar una `Transition` al cambiar de workspace (la plataforma la anima si sabe).
+    pub workspace_transition: bool,
 }
 
 impl Default for Settings {
@@ -60,6 +62,7 @@ impl Default for Settings {
             vertical_axis: Axis::Rows,
             bindings: [None; WORKSPACE_COUNT],
             float_size: (0.6, 0.7),
+            workspace_transition: true,
         }
     }
 }
@@ -136,6 +139,7 @@ pub struct Desktop {
     /// La ventana con el foco del sistema es una excluida: los atajos sobre la ventana no la tocan (§6.2).
     foreground_excluded: bool,
     bar_state: HashMap<MonitorId, bool>,
+    transition: Option<Transition>,
 }
 
 impl Desktop {
@@ -156,6 +160,7 @@ impl Desktop {
             minimized_order: vec![],
             foreground_excluded: false,
             bar_state: HashMap::new(),
+            transition: None,
         };
         let primary = d.primary_id();
         for i in 0..WORKSPACE_COUNT {
@@ -386,10 +391,21 @@ impl Desktop {
     }
 
     fn adjacent_monitor(&self, from: MonitorId, dir: Dir) -> Option<MonitorId> {
-        let (cx, cy) = self.monitor_by_id(from).center();
+        let src = self.monitor_by_id(from);
+        let (cx, cy) = src.center();
+        let sb = src.bounds;
         self.monitors
             .iter()
             .filter(|m| m.id != from)
+            // Un monitor solo es vecino si comparte tramo con el origen en el otro eje: dos pantallas una junto
+            // a otra, con una algo más alta, no son «arriba» y «abajo» entre sí.
+            .filter(|m| {
+                let b = m.bounds;
+                match dir.orientation() {
+                    Orientation::X => b.y < sb.bottom() && sb.y < b.bottom(),
+                    Orientation::Y => b.x < sb.right() && sb.x < b.right(),
+                }
+            })
             .filter(|m| {
                 let (x, y) = m.center();
                 match dir {
@@ -609,12 +625,18 @@ impl Desktop {
         }
         if !self.workspaces[ws].visible {
             let mon = self.workspaces[ws].monitor;
+            let mut out = Vec::new();
             if let Some(cur) = self.visible_workspace_on(mon) {
+                out = self.windows_in(cur);
                 fx.extend(self.hide_fx(cur));
                 self.workspaces[cur].visible = false;
             }
             self.workspaces[ws].visible = true;
             fx.extend(self.show_fx(ws));
+            let inn = self.windows_in(ws);
+            if self.settings.workspace_transition && !(out.is_empty() && inn.is_empty()) {
+                self.transition = Some(Transition { area: self.area(ws), out, inn });
+            }
         }
         self.set_active(ws);
         let f = self.pick_focus(ws);
@@ -625,12 +647,23 @@ impl Desktop {
         fx
     }
 
+    /// La transición anotada por el último cambio de workspace (una sola vez).
+    pub fn take_transition(&mut self) -> Option<Transition> {
+        self.transition.take()
+    }
+
     pub fn move_focused_to_workspace(&mut self, ws: usize, follow: bool) -> Vec<Effect> {
         let Some(id) = self.focused() else { return vec![] };
         self.move_window_to_workspace(id, ws, follow)
     }
 
     fn move_window_to_workspace(&mut self, id: WindowId, ws: usize, follow: bool) -> Vec<Effect> {
+        self.move_window_inner(id, ws, follow, true)
+    }
+
+    /// `refocus_source`: al sacar la ventana del workspace activo, enfocar la que queda allí. Quien se la lleva
+    /// consigo (cruce de monitor) lo desactiva: un segundo `Focus` a otra ventana podría ganarle al de la movida.
+    fn move_window_inner(&mut self, id: WindowId, ws: usize, follow: bool, refocus_source: bool) -> Vec<Effect> {
         let Some(entry) = self.windows.get(&id).cloned() else { return vec![] };
         let Some(src) = entry.workspace else { return vec![] };
         if ws >= WORKSPACE_COUNT || ws == src || entry.kind == Kind::Excluded {
@@ -649,7 +682,7 @@ impl Desktop {
         }
         if follow {
             fx.extend(self.switch_workspace(ws));
-        } else if src == self.active {
+        } else if src == self.active && refocus_source {
             if let Some(f) = self.workspaces[src].focused {
                 fx.push(Effect::Focus(f));
             }
@@ -895,6 +928,19 @@ impl Desktop {
     }
 
     /// Ventanas seguidas que están (o creen estar) en pantalla completa y se pueden revisar.
+    /// Ventanas que deberían verse ahora mismo: las del mosaico (o flotantes) en un workspace visible y sin minimizar.
+    /// Si una de ellas ya no es visible de verdad, ocupa un hueco vacío en pantalla.
+    pub fn shown_windows(&self) -> Vec<WindowId> {
+        let mut v: Vec<_> = self
+            .windows
+            .iter()
+            .filter(|(_, e)| !e.minimized && e.workspace.is_some_and(|ws| self.workspaces[ws].visible))
+            .map(|(id, _)| *id)
+            .collect();
+        v.sort();
+        v
+    }
+
     pub fn tracked_windows(&self) -> Vec<(WindowId, bool)> {
         let mut v: Vec<_> = self.windows.iter().map(|(id, e)| (*id, e.user_fullscreen)).collect();
         v.sort();
@@ -993,13 +1039,21 @@ impl Desktop {
         }
         let area = self.area(ws);
         let settings = self.settings.layout;
-        if self.workspaces[ws].layout.move_window(id, dir, &area, &settings) {
+        if self.workspaces[ws].layout.move_window(id, dir, &area, &settings, false) {
             return self.place_fx(ws);
         }
         // Tope de la estructura: pasa al workspace visible del monitor vecino.
-        let Some(mon) = self.adjacent_monitor(self.workspaces[ws].monitor, dir) else { return vec![] };
-        let Some(target) = self.visible_workspace_on(mon) else { return vec![] };
-        let mut fx = self.move_window_to_workspace(id, target, false);
+        let target = self
+            .adjacent_monitor(self.workspaces[ws].monitor, dir)
+            .and_then(|mon| self.visible_workspace_on(mon));
+        let Some(target) = target else {
+            // Sin monitor hacia ese lado, la ventana se coloca junto a las demás de su monitor.
+            if self.workspaces[ws].layout.move_window(id, dir, &area, &settings, true) {
+                return self.place_fx(ws);
+            }
+            return vec![];
+        };
+        let mut fx = self.move_window_inner(id, target, false, false);
         self.set_active(target);
         self.workspaces[target].focused = Some(id);
         fx.push(Effect::Focus(id));
@@ -1143,6 +1197,40 @@ mod tests {
 
     fn rect_in(d: &Desktop, ws: usize, id: WindowId) -> Rect {
         placed(&d.place_fx(ws)).into_iter().find(|(w, _)| *w == id).unwrap().1
+    }
+
+    #[test]
+    fn cambiar_de_workspace_anota_salientes_y_entrantes_una_sola_vez() {
+        let mut d = one();
+        d.add_window(1);
+        d.add_window(2);
+        d.move_focused_to_workspace(1, false); // la enfocada (2) pasa al workspace 2, que queda oculto
+        d.switch_workspace(1);
+        let t = d.take_transition().expect("hay transición");
+        assert_eq!(t.out, vec![1]);
+        assert_eq!(t.inn, vec![2]);
+        assert_eq!(t.area, Rect::new(0, 0, 3000, 1000));
+        assert!(d.take_transition().is_none(), "se recoge una sola vez");
+        // Cambiar al que ya está a la vista no anima.
+        d.switch_workspace(1);
+        assert!(d.take_transition().is_none());
+    }
+
+    #[test]
+    fn sin_ventanas_en_ninguno_de_los_dos_no_hay_transicion() {
+        let mut d = one();
+        d.switch_workspace(3);
+        assert!(d.take_transition().is_none());
+    }
+
+    #[test]
+    fn la_transicion_se_puede_apagar() {
+        let mut s = Settings::default();
+        s.workspace_transition = false;
+        let mut d = Desktop::new(s, vec![mon(0, 0, 0, 3000, 1000, true)]);
+        d.add_window(1);
+        d.switch_workspace(1);
+        assert!(d.take_transition().is_none());
     }
 
     #[test]
@@ -1468,11 +1556,79 @@ mod tests {
     }
 
     #[test]
+    fn arriba_no_salta_a_un_monitor_que_solo_esta_al_lado() {
+        // El secundario (derecha) está algo más abajo que el principal: no hay nada «arriba» ni «abajo» entre ellos.
+        let mut s = Settings::default();
+        s.bindings = [Some(0), Some(0), Some(0), Some(0), Some(1), Some(1), Some(1), None, None];
+        let mut d = Desktop::new(s, vec![mon(0, 0, 0, 1920, 1000, true), mon(1, 1920, 200, 1920, 1000, false)]);
+        d.add_window(1);
+        d.switch_workspace(4);
+        d.add_window(2);
+        d.note_focus(2);
+        for _ in 0..5 {
+            d.move_dir(Dir::Up);
+        }
+        assert_eq!(d.workspace_of(2), Some(4), "sigue en su monitor");
+        assert_eq!(d.workspace_of(1), Some(0));
+    }
+
+    #[test]
+    fn intercambiar_de_sitio_en_un_solo_movimiento() {
+        let mut d = two();
+        d.switch_workspace(4);
+        d.add_window(1); // «Spotify» arriba
+        d.add_window(2); // «Discord» abajo
+        d.note_focus(2);
+        let y = |d: &Desktop, id| rect_in(d, 4, id).y;
+        assert!(y(&d, 1) < y(&d, 2));
+        d.move_dir(Dir::Up);
+        assert!(y(&d, 2) < y(&d, 1), "Discord pasó arriba con una sola pulsación");
+        assert_eq!(d.workspace_of(2), Some(4));
+        // A la derecha no hay monitor: se coloca junto a la otra, en su misma fila.
+        d.move_dir(Dir::Right);
+        assert_eq!(d.workspace_of(2), Some(4));
+        assert_eq!(y(&d, 1), y(&d, 2));
+        assert!(rect_in(&d, 4, 2).x > rect_in(&d, 4, 1).x);
+        // A la izquierda sí hay monitor: cruza.
+        d.move_dir(Dir::Left);
+        d.move_dir(Dir::Left);
+        assert_eq!(d.workspace(d.workspace_of(2).unwrap()).monitor, 0);
+    }
+
+    #[test]
+    fn cruzar_de_monitor_solo_enfoca_la_ventana_movida() {
+        let mut d = two();
+        d.add_window(1);
+        d.add_window(2);
+        d.note_focus(2);
+        // La 2 está en el tope derecho del monitor horizontal: la siguiente pulsación la pasa al vertical.
+        let fx = d.move_dir(Dir::Right);
+        assert_eq!(d.workspace_of(2), Some(4), "pasó al workspace visible del monitor 2");
+        assert_eq!(d.active_workspace(), 4);
+        let focuses: Vec<_> = fx.iter().filter(|e| matches!(e, Effect::Focus(_))).collect();
+        assert_eq!(focuses, vec![&Effect::Focus(2)], "no debe enfocar a la que se quedó en el monitor origen");
+        // Otra pulsación en la misma dirección no arrastra a ninguna otra ventana.
+        let again = d.move_dir(Dir::Right);
+        assert!(again.is_empty());
+        assert_eq!(d.workspace_of(1), Some(0));
+        assert_eq!(d.focused(), Some(2));
+    }
+
+    #[test]
+    fn mover_a_un_workspace_sigue_enfocando_lo_que_queda() {
+        let mut d = one();
+        d.add_window(1);
+        d.add_window(2);
+        let fx = d.move_focused_to_workspace(3, false);
+        assert!(fx.contains(&Effect::Focus(1)), "alt+shift+N enfoca la ventana que queda en el origen");
+    }
+
+    #[test]
     fn acciones_de_ventana_apilar_y_alternar() {
         let mut d = one();
         d.add_window(1);
         d.add_window(2);
-        d.apply_action(&Action::MoveDir(Dir::Left));
+        d.apply_action(&Action::MoveDir(Dir::Down));
         assert_eq!(d.workspace(0).layout.group_windows(), vec![vec![1, 2]]);
         let before = rect_in(&d, 0, 2);
         d.apply_action(&Action::ToggleStack);

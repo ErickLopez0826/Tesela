@@ -53,8 +53,8 @@ describe("formato", () => {
 
   it("reloj con ceros", () => {
     const d = new Date(2026, 0, 2, 3, 4, 5);
-    expect(formatClock(d)).toBe("03:04");
-    expect(formatClock(d, true)).toBe("03:04:05");
+    expect(formatClock(d)).toBe("3:04 AM");
+    expect(formatClock(d, true)).toBe("3:04:05 AM");
   });
 });
 

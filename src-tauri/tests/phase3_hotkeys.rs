@@ -9,11 +9,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use common::*;
-use window_manager_lib::domain::manageable::Scope;
-use window_manager_lib::infrastructure::config_file::{config_path, load_file};
-use window_manager_lib::infrastructure::windows::facts::primary_work_area;
-use window_manager_lib::infrastructure::windows::platform::Callbacks;
-use window_manager_lib::infrastructure::windows::runtime::{Runtime, RuntimeOptions};
+use tesela_lib::domain::manageable::Scope;
+use tesela_lib::infrastructure::config_file::{config_path, load_file};
+use tesela_lib::infrastructure::windows::facts::primary_work_area;
+use tesela_lib::infrastructure::windows::platform::Callbacks;
+use tesela_lib::infrastructure::windows::runtime::{Runtime, RuntimeOptions};
 
 fn config_text(extra: &str) -> String {
     format!(
@@ -78,7 +78,7 @@ fn atajos_modo_redimensionar_recarga_y_salida() {
         },
         ..RuntimeOptions::from_config(Scope::TitlePrefix("WMTEST".into()), config)
     };
-    let originals: Vec<_> = w.ids.iter().map(|&id| window_manager_lib::infrastructure::windows::facts::window_rect(id).unwrap()).collect();
+    let originals: Vec<_> = w.ids.iter().map(|&id| tesela_lib::infrastructure::windows::facts::window_rect(id).unwrap()).collect();
     let rt = Runtime::start_with(options);
     let widths = || -> Vec<i32> { w.ids.iter().map(|&id| frame(id).w).collect() };
 
@@ -136,7 +136,7 @@ fn atajos_modo_redimensionar_recarga_y_salida() {
     ctrl_alt_f(20);
     wait_until("la app pide salir", || exited.load(Ordering::SeqCst));
     wait_until("ventanas restauradas al salir", || {
-        w.ids.iter().zip(&originals).all(|(&id, o)| window_manager_lib::infrastructure::windows::facts::window_rect(id).unwrap() == *o)
+        w.ids.iter().zip(&originals).all(|(&id, o)| tesela_lib::infrastructure::windows::facts::window_rect(id).unwrap() == *o)
     });
     rt.stop();
 }

@@ -507,44 +507,63 @@ impl Layout {
     }
 
     /// Mueve la ventana en una dirección. Devuelve `false` si no hay cambio posible.
-    pub fn move_window(&mut self, id: WindowId, dir: Dir, area: &Rect, s: &LayoutSettings) -> bool {
+    ///
+    /// - Dentro de un apilado, intercambia con su vecina.
+    /// - Sobre el eje principal, una ventana sola en su grupo cambia de sitio con el grupo vecino; si el grupo tiene
+    ///   varias ventanas, se une al vecino.
+    /// - En el eje contrario solo actúa con `merge`: una ventana sola se une al grupo vecino, del lado pedido. El
+    ///   escritorio lo activa cuando no hay otro monitor hacia donde mandarla.
+    pub fn move_window(&mut self, id: WindowId, dir: Dir, area: &Rect, s: &LayoutSettings, merge: bool) -> bool {
         let Some((gi, wi)) = self.locate(id) else { return false };
         let o = dir.orientation();
         let step: isize = if dir.is_forward() { 1 } else { -1 };
         let stack_o = self.groups[gi].stack.orientation();
         if o == stack_o {
             let target = wi as isize + step;
-            if target >= 0 && (target as usize) < self.groups[gi].windows.len() {
+            if target >= 0 && (target as usize) < self.groups.get(gi).map_or(0, |g| g.windows.len()) {
                 self.groups[gi].windows.swap(wi, target as usize);
                 return true;
             }
         }
+        let single = self.groups[gi].windows.len() == 1;
         if o != self.axis.orientation() {
-            return false;
+            if !merge || !single {
+                return false;
+            }
+            let tgi = if gi > 0 { gi - 1 } else if gi + 1 < self.groups.len() { gi + 1 } else { return false };
+            if !self.can_add_to_group(tgi, area, s) {
+                return false;
+            }
+            self.take_out(gi, wi);
+            let tgi = if tgi > gi { tgi - 1 } else { tgi };
+            self.join_group(tgi, id, dir.is_forward());
+            self.normalize(area, s);
+            return true;
         }
         // Salto entre grupos a lo largo del eje principal.
         let tgi = gi as isize + step;
         if tgi >= 0 && (tgi as usize) < self.groups.len() {
             let tgi = tgi as usize;
+            if single {
+                // Se cambian de sitio; cada posición conserva su proporción.
+                self.groups.swap(gi, tgi);
+                let (a, b) = (self.groups[gi].size, self.groups[tgi].size);
+                self.groups[gi].size = b;
+                self.groups[tgi].size = a;
+                return true;
+            }
             if !self.can_add_to_group(tgi, area, s) {
                 return false;
             }
             let removed_group = self.take_out(gi, wi);
             let tgi = if removed_group && tgi > gi { tgi - 1 } else { tgi };
-            let t = &mut self.groups[tgi];
-            let m = t.windows.len();
-            let pos = if dir.is_forward() { 0 } else { m };
-            t.windows.insert(pos, id);
-            let share = 1.0 / (m + 1) as f64;
-            for sh in &mut t.shares {
-                *sh *= m as f64 / (m + 1) as f64;
-            }
-            t.shares.insert(pos, share);
+            // Se entra por el lado por el que se llega: yendo hacia delante, al principio del apilado.
+            self.join_group(tgi, id, !dir.is_forward());
             self.normalize(area, s);
             return true;
         }
         // Borde: una ventana apilada sale a una columna nueva si cabe.
-        if self.groups[gi].windows.len() > 1 && self.can_add_group(area, s) {
+        if !single && self.can_add_group(area, s) {
             self.take_out(gi, wi);
             let pos = if dir.is_forward() { self.groups.len() } else { 0 };
             self.insert_group_at(pos, id);
@@ -552,6 +571,18 @@ impl Layout {
             return true;
         }
         false
+    }
+
+    /// Mete la ventana en un grupo existente, al principio (`after = false`) o al final del apilado.
+    fn join_group(&mut self, tgi: usize, id: WindowId, after: bool) {
+        let t = &mut self.groups[tgi];
+        let m = t.windows.len();
+        let pos = if after { m } else { 0 };
+        t.windows.insert(pos, id);
+        for sh in &mut t.shares {
+            *sh *= m as f64 / (m + 1) as f64;
+        }
+        t.shares.insert(pos, 1.0 / (m + 1) as f64);
     }
 
     /// Sustituye una ventana por otra en el mismo hueco (p. ej. al cambiar de identidad).
@@ -728,20 +759,40 @@ mod tests {
     // ----- Apiladas -----
 
     #[test]
-    fn mover_a_otra_columna_reajusta_ambas() {
+    fn una_ventana_sola_cambia_de_sitio_con_la_vecina_en_un_solo_movimiento() {
         let mut l = layout_with(3);
-        assert!(l.move_window(1, Dir::Right, &AREA, &s()));
-        // La columna 1 desapareció: quedan 2 columnas, la primera con 1 y 2 apiladas.
-        assert_eq!(l.group_windows(), vec![vec![1, 2], vec![3]]);
+        assert!(l.move_window(1, Dir::Right, &AREA, &s(), false));
+        assert_eq!(l.group_windows(), vec![vec![2], vec![1], vec![3]]);
+        assert!(l.move_window(1, Dir::Left, &AREA, &s(), false));
+        assert_eq!(l.group_windows(), vec![vec![1], vec![2], vec![3]]);
         for (_, r) in l.compute(&AREA, &s()) {
-            assert!((r.w - 1500).abs() <= 1);
+            assert!((r.w - 1000).abs() <= 1);
         }
+    }
+
+    #[test]
+    fn en_el_eje_contrario_solo_se_une_al_vecino_si_se_permite() {
+        let mut l = layout_with(2);
+        assert!(!l.move_window(2, Dir::Down, &AREA, &s(), false));
+        assert!(l.move_window(2, Dir::Down, &AREA, &s(), true));
+        assert_eq!(l.group_windows(), vec![vec![1, 2]]);
+        let mut l = layout_with(2);
+        assert!(l.move_window(2, Dir::Up, &AREA, &s(), true));
+        assert_eq!(l.group_windows(), vec![vec![2, 1]]);
+    }
+
+    #[test]
+    fn una_ventana_de_un_grupo_con_varias_se_une_al_vecino_al_cruzar() {
+        let mut l = layout_with(3);
+        l.move_window(2, Dir::Down, &AREA, &s(), true); // [[1,2],[3]]
+        assert!(l.move_window(2, Dir::Right, &AREA, &s(), false));
+        assert_eq!(l.group_windows(), vec![vec![1], vec![2, 3]]);
     }
 
     #[test]
     fn apiladas_reparten_el_alto() {
         let mut l = layout_with(2);
-        l.move_window(2, Dir::Left, &AREA, &s());
+        l.move_window(2, Dir::Down, &AREA, &s(), true);
         assert_eq!(l.group_windows(), vec![vec![1, 2]]);
         let rects = l.compute(&AREA, &s());
         assert_eq!(rects.iter().map(|(_, r)| r.h).sum::<i32>(), 1000);
@@ -754,7 +805,7 @@ mod tests {
         for id in 2..=4 {
             // Apilamos a mano: mover a la columna de la izquierda.
             l.insert_window(id, &AREA, &s()).unwrap();
-            l.move_window(id, Dir::Left, &AREA, &s());
+            l.move_window(id, Dir::Down, &AREA, &s(), true);
         }
         assert_eq!(l.group_windows().len(), 1);
         let top = l.group_windows()[0][0];
@@ -770,7 +821,7 @@ mod tests {
         let mut l = layout_with(1);
         for id in 2..=3 {
             l.insert_window(id, &AREA, &s()).unwrap();
-            l.move_window(id, Dir::Left, &AREA, &s());
+            l.move_window(id, Dir::Down, &AREA, &s(), true);
         }
         let first = l.group_windows()[0][0];
         for _ in 0..100 {
@@ -783,25 +834,25 @@ mod tests {
     #[test]
     fn salir_de_una_pila_crea_columna_nueva() {
         let mut l = layout_with(2);
-        l.move_window(2, Dir::Left, &AREA, &s());
-        assert!(l.move_window(1, Dir::Right, &AREA, &s()));
+        l.move_window(2, Dir::Down, &AREA, &s(), true);
+        assert!(l.move_window(1, Dir::Right, &AREA, &s(), false));
         assert_eq!(l.group_windows(), vec![vec![2], vec![1]]);
     }
 
     #[test]
     fn reordenar_dentro_de_la_pila() {
         let mut l = layout_with(2);
-        l.move_window(2, Dir::Left, &AREA, &s());
+        l.move_window(2, Dir::Down, &AREA, &s(), true);
         assert_eq!(l.group_windows(), vec![vec![1, 2]]);
-        assert!(l.move_window(2, Dir::Up, &AREA, &s()));
+        assert!(l.move_window(2, Dir::Up, &AREA, &s(), false));
         assert_eq!(l.group_windows(), vec![vec![2, 1]]);
-        assert!(!l.move_window(2, Dir::Up, &AREA, &s()), "ya está al principio");
+        assert!(!l.move_window(2, Dir::Up, &AREA, &s(), false), "ya está al principio");
     }
 
     #[test]
     fn alternar_apilado_cambia_de_vertical_a_horizontal() {
         let mut l = layout_with(2);
-        l.move_window(2, Dir::Left, &AREA, &s());
+        l.move_window(2, Dir::Down, &AREA, &s(), true);
         assert_eq!(l.stack_of(1), Some(Stack::Vertical));
         assert!(l.toggle_stack(1));
         assert_eq!(l.stack_of(1), Some(Stack::Horizontal));
@@ -896,7 +947,7 @@ mod tests {
     fn foco_hacia_los_lados_y_arriba_abajo() {
         let mut l = layout_with(2);
         l.insert_window(3, &AREA, &s()).unwrap();
-        l.move_window(3, Dir::Left, &AREA, &s()); // 3 apilada con 2
+        l.move_window(3, Dir::Down, &AREA, &s(), true); // 3 apilada con 2
         let rects = l.compute(&AREA, &s());
         assert_eq!(focus_neighbor(1, Dir::Right, &rects), Some(2));
         assert_eq!(focus_neighbor(2, Dir::Left, &rects), Some(1));

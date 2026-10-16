@@ -71,7 +71,7 @@ Guía paso a paso en `docs/instalacion-y-actualizaciones.md`.
 - **Firma de código**: sin certificado, SmartScreen avisará de «editor desconocido». No firmé nada.
 - **Actualizaciones**: faltan (1) la clave de firma del actualizador (`tauri signer generate`; secreta), (2) un lugar donde publicar `latest.json` y el instalador (p. ej. GitHub Releases) y (3) compilar con `--features updater`. Hasta entonces la pestaña General lo dice. Criterio «se actualiza» de §12: **no cumplido**.
 - **Arranque con Windows** verificado contra una clave de pruebas del registro, **no** contra el arranque real ni reiniciando sesión. Además activarlo mientras GlazeWM también arranca solo provoca peleas por las ventanas y los atajos.
-- **Icono definitivo**: el icono es un cuadrado azul provisional de la Fase 0. Necesito tu diseño.
+- ~~Icono definitivo~~: resuelto, ya usa el logotipo (`assets/logo.png`, ver D-79).
 - **Primer arranque**: la app instalada se abre sin gestor ni barra (modo seguro); hay que activarlos en la pestaña General o con el arranque automático. No hay asistente de primer uso.
 - **Versión**: sigue siendo `0.1.0`; falta decidir tu política de versiones antes de la primera publicación.
 - **Pruebas en otro equipo**: todo lo probado se probó en este equipo (Windows 11, dos monitores). No hay pruebas con otro DPI, otros monitores ni sin WebView2 preinstalado.

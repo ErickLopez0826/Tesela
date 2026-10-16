@@ -1,7 +1,10 @@
 <script lang="ts">
   import type { StateSnapshot, SystemStats } from "../api/state";
   import type { InstalledModule } from "../api/modules";
-  import type { MediaInfo, VolumeState } from "../api/system";
+  import type { VolumeState } from "../api/system";
+  import Icon from "./Icon.svelte";
+  import WorkspaceStrip from "./WorkspaceStrip.svelte";
+  import Marquee from "./Marquee.svelte";
   import ModuleFrame from "./ModuleFrame.svelte";
   import { formatClock, formatPercent, ramPercent, workspacesFor } from "../stores/wmState";
 
@@ -11,11 +14,10 @@
     stats,
     now,
     volume = null,
-    media = null,
+    gpu = null,
     temperature = null,
     modules = [],
     onWorkspace,
-    onPanel,
     onMute = () => {},
   }: {
     monitorId: number;
@@ -23,83 +25,96 @@
     stats: SystemStats | null;
     now: Date;
     volume?: VolumeState | null;
-    media?: MediaInfo | null;
+    gpu?: number | null;
     temperature?: number | null;
     modules?: InstalledModule[];
     onWorkspace: (number: number) => void;
-    onPanel: () => void;
     onMute?: (muted: boolean) => void;
   } = $props();
 
   const workspaces = $derived(workspacesFor(state, monitorId));
   const barModules = $derived(modules.filter((m) => m.enabled && m.manifest.ui.bar));
-  const mediaText = $derived(media ? [media.artist, media.title].filter(Boolean).join(" – ") : "");
+
+  // Datos de la derecha en orden; entre cada par visible va un separador de tres puntos.
+  const readouts = $derived([
+    ...barModules.map((m) => `mod:${m.manifest.id}`),
+    ...(stats ? ["cpu", "ram"] : []),
+    ...(gpu !== null ? ["gpu"] : []),
+    ...(temperature !== null ? ["temp"] : []),
+    ...(volume ? ["vol"] : []),
+    "clock",
+  ]);
 </script>
 
 <div class="bar">
   <div class="zone left">
-    {#each workspaces as w (w.number)}
-      <button class="ws" class:visible={w.visible} class:active={w.active} class:busy={w.window_count > 0} onclick={() => onWorkspace(w.number)}>
-        {w.number}
-      </button>
-    {/each}
+    <WorkspaceStrip {workspaces} {onWorkspace} />
     {#if state?.mode}<span class="badge">modo {state.mode}</span>{/if}
     {#if state?.paused}<span class="badge warn">en pausa</span>{/if}
   </div>
 
   <div class="zone center" title={state?.focused?.title ?? ""}>
-    {#if state?.focused}{state.focused.title || state.focused.exe}{/if}
+    {#if state?.focused}
+      <div class="title"><Marquee text={state.focused.title || state.focused.exe} /></div>
+    {/if}
   </div>
 
   <div class="zone right">
-    {#each barModules as m (m.manifest.id)}
-      <ModuleFrame module={m} height={32} width={m.manifest.ui.bar?.width ?? 120} />
+    {#each readouts as key, i (key)}
+      {#if i > 0}<span class="dots" aria-hidden="true"></span>{/if}
+      {#if key.startsWith("mod:")}
+        {@const m = barModules.find((b) => `mod:${b.manifest.id}` === key)}
+        {#if m}<ModuleFrame module={m} height={32} width={m.manifest.ui.bar?.width ?? 120} />{/if}
+      {:else if key === "cpu" && stats}
+        <span class="stat" title="CPU">CPU {formatPercent(stats.cpu_percent)}</span>
+      {:else if key === "ram" && stats}
+        <span class="stat" title="RAM">RAM {formatPercent(ramPercent(stats))}</span>
+      {:else if key === "gpu" && gpu !== null}
+        <span class="stat" title="Tarjeta gráfica">GPU {formatPercent(gpu)}</span>
+      {:else if key === "temp" && temperature !== null}
+        <span class="stat" title="Temperatura en Mérida">Mérida {Math.round(temperature)} °C</span>
+      {:else if key === "vol" && volume}
+        <button class="stat vol" aria-label={volume.muted ? "Activar sonido" : "Silenciar"} onclick={() => onMute(!volume.muted)}>
+          <Icon name={volume.muted ? "volume-off" : "volume"} size={14} /> {Math.round(volume.percent)}%
+        </button>
+      {:else if key === "clock"}
+        <span class="clock">{formatClock(now)}</span>
+      {/if}
     {/each}
-    {#if media}<span class="media" title={mediaText}>{media.playing ? "♪" : "⏸"} {mediaText}</span>{/if}
-    {#if stats}
-      <span class="stat" title="CPU">CPU {formatPercent(stats.cpu_percent)}</span>
-      <span class="stat" title="RAM">RAM {formatPercent(ramPercent(stats))}</span>
-    {/if}
-    {#if temperature !== null}<span class="stat" title="Temperatura">{Math.round(temperature)} °C</span>{/if}
-    {#if volume}
-      <button class="stat vol" aria-label={volume.muted ? "Activar sonido" : "Silenciar"} onclick={() => onMute(!volume.muted)}>
-        {volume.muted ? "🔇" : "🔊"} {Math.round(volume.percent)}%
-      </button>
-    {/if}
-    <span class="clock">{formatClock(now)}</span>
-    <button class="panel-btn" aria-label="Abrir panel" onclick={onPanel}>☰</button>
   </div>
 </div>
 
 <style>
-  :global(html, body) { margin: 0; height: 100%; overflow: hidden; background: #111; }
+  :global(html, body) { margin: 0; height: 100%; overflow: hidden; background: transparent; }
   .bar {
     display: grid;
-    grid-template-columns: 1fr minmax(0, 2fr) 1.4fr;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
     height: 100vh;
     padding: 0 10px;
     box-sizing: border-box;
-    background: #14161a;
-    color: #e6e6e6;
-    font: 13px/1 "Segoe UI", system-ui, sans-serif;
+    background-color: rgba(10, 10, 11, 0.58);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    color: #f1f1f1;
+    font: 12px/1 "Cascadia Mono", Consolas, ui-monospace, monospace;
+    letter-spacing: 0.04em;
     user-select: none;
   }
   .zone { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .left { justify-content: flex-start; }
-  .center { justify-content: center; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; opacity: 0.85; }
-  .right { justify-content: flex-end; }
+  .left { justify-content: flex-start; position: relative; }
+  .center { justify-content: center; overflow: hidden; opacity: 0.85; }
+  .title { width: clamp(120px, 30vw, 560px); min-width: 0; }
+  .right { justify-content: flex-end; gap: 10px; }
   button { font: inherit; color: inherit; background: transparent; border: 0; cursor: pointer; border-radius: 6px; }
-  .ws { min-width: 24px; height: 24px; opacity: 0.45; }
-  .ws.busy { opacity: 0.8; }
-  .ws.visible { opacity: 1; background: #2b2f38; }
-  .ws.active { background: #3d6df2; color: #fff; }
-  .badge { padding: 2px 6px; border-radius: 6px; background: #2b2f38; font-size: 11px; }
-  .badge.warn { background: #7a4b00; }
+  /* Tres puntos apilados, estilo Nothing, entre dato y dato. */
+  .dots {
+    flex: none; width: 4px; height: 15px; opacity: 0.35;
+    background: radial-gradient(circle, currentColor 1px, transparent 1.4px) 50% 0 / 4px 5px repeat-y;
+  }
+  .badge { padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.12); font-size: 11px; }
+  .badge.warn { background: #f2f2f2; color: #0a0a0b; }
   .stat { opacity: 0.8; font-variant-numeric: tabular-nums; }
-  .media { max-width: 220px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; opacity: 0.8; }
   .vol { padding: 2px 4px; }
   .clock { font-weight: 600; font-variant-numeric: tabular-nums; }
-  .panel-btn { padding: 2px 8px; font-size: 15px; }
-  .panel-btn:hover, .ws:hover, .vol:hover { background: #2b2f38; }
+  .vol:hover { background: rgba(255, 255, 255, 0.14); }
 </style>

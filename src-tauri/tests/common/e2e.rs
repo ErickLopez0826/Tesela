@@ -7,8 +7,8 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use window_manager_lib::domain::modules::{Version, CORE_VERSION};
-use window_manager_lib::infrastructure::module_store::ModuleStore;
+use tesela_lib::domain::modules::{Version, CORE_VERSION};
+use tesela_lib::infrastructure::module_store::ModuleStore;
 
 fn port_open() -> bool {
     use std::net::ToSocketAddrs;
@@ -68,7 +68,7 @@ pub fn store(base: &Path) -> ModuleStore {
 /// Arranca la app probando un módulo y devuelve el informe que escribió su ventana principal.
 pub fn selftest(base: &Path, module: &str) -> Value {
     let out = base.join(format!("informe-{module}-{}.json", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()));
-    let exe = std::env::var_os("WM_TEST_EXE").unwrap_or_else(|| env!("CARGO_BIN_EXE_window-manager").into());
+    let exe = std::env::var_os("WM_TEST_EXE").unwrap_or_else(|| env!("CARGO_BIN_EXE_tesela").into());
     let mut child = Command::new(exe)
         .args(["--selftest-module", module])
         .env("WM_CONFIG_DIR", base)

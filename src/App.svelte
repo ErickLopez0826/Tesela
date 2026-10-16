@@ -1,9 +1,12 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
+  import "./lib/styles/nothing.css";
+  import DotField from "./lib/components/DotField.svelte";
   import ModuleSelfTest from "./lib/views/ModuleSelfTest.svelte";
   import ExclusionPanel from "./lib/components/ExclusionPanel.svelte";
   import GeneralPanel from "./lib/components/GeneralPanel.svelte";
+  import AppearancePanel from "./lib/components/AppearancePanel.svelte";
   import ModulesPanel from "./lib/components/ModulesPanel.svelte";
   import { generalApi, type GeneralStatus } from "./lib/api/general";
   import { modulesStore } from "./lib/stores/modules";
@@ -11,7 +14,7 @@
   import { exclusionsStore } from "./lib/stores/exclusions";
   import { windowsStore } from "./lib/stores/windows";
 
-  let tab: "windows" | "exclusions" | "modules" | "general" = $state("windows");
+  let tab: "windows" | "exclusions" | "modules" | "general" | "appearance" = $state("windows");
   let general: GeneralStatus | null = $state(null);
   // Solo con `--selftest-module <id>`: la ventana principal prueba ese módulo de extremo a extremo.
   let selftest: string | null = $state(null);
@@ -28,12 +31,15 @@
 {#if selftest}
   <ModuleSelfTest moduleId={selftest} />
 {:else}
+<DotField />
 <main>
   <nav>
+    <img class="logo" src="/logo.png" alt="Tesela" width="26" height="26" />
     <button class:active={tab === "windows"} onclick={() => (tab = "windows")}>Ventanas</button>
     <button class:active={tab === "exclusions"} onclick={() => (tab = "exclusions")}>Exclusiones</button>
     <button class:active={tab === "modules"} onclick={() => (tab = "modules")}>Módulos</button>
     <button class:active={tab === "general"} onclick={() => (tab = "general")}>General</button>
+    <button class:active={tab === "appearance"} onclick={() => (tab = "appearance")}>Personalización</button>
     <button onclick={() => windowsStore.refresh()} disabled={$windowsStore.loading}>Refrescar</button>
   </nav>
 
@@ -56,6 +62,9 @@
       onCheckUpdates={generalApi.checkUpdates}
       onInstallUpdate={generalApi.installUpdate}
     />
+  {:else if tab === "appearance"}
+    <h1>Personalización</h1>
+    <AppearancePanel />
   {:else if tab === "modules"}
     <h1>Módulos</h1>
     <ModulesPanel
@@ -80,7 +89,11 @@
 {/if}
 
 <style>
-  main { font-family: system-ui, sans-serif; padding: 1rem; }
-  nav { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
-  nav .active { font-weight: bold; text-decoration: underline; }
+  main { font-family: system-ui, sans-serif; padding: 1.4rem 1.6rem; position: relative; }
+  nav { display: flex; gap: 0.5rem; margin-bottom: 1.4rem; flex-wrap: wrap; padding: 6px; width: fit-content; border: 1px solid var(--line); border-radius: 999px; background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(10px); }
+  nav { align-items: center; }
+  .logo { border-radius: 8px; margin: 0 4px 0 2px; }
+  nav button { border-color: transparent; background: transparent; }
+  nav .active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); box-shadow: 0 0 22px -6px rgba(255, 255, 255, 0.8); }
+  nav .active:hover:not(:disabled) { background: var(--accent); }
 </style>

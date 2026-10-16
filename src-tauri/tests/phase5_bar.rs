@@ -10,9 +10,9 @@ use std::process::{Child, Command};
 use std::time::Duration;
 
 use common::*;
-use window_manager_lib::domain::desktop::Monitor;
-use window_manager_lib::domain::geometry::Rect;
-use window_manager_lib::infrastructure::windows::facts::{facts_of, list_monitors, top_level_windows};
+use tesela_lib::domain::desktop::Monitor;
+use tesela_lib::domain::geometry::Rect;
+use tesela_lib::infrastructure::windows::facts::{facts_of, list_monitors, top_level_windows};
 
 struct App(Child);
 
@@ -27,8 +27,8 @@ fn bars() -> Vec<(isize, Rect)> {
         .into_iter()
         .filter_map(|id| {
             let f = facts_of(id)?;
-            (f.title == "Window Manager Bar" && f.exe.eq_ignore_ascii_case("window-manager.exe"))
-                .then(|| (id, window_manager_lib::infrastructure::windows::facts::window_rect(id).unwrap()))
+            (f.title == "Tesela Bar" && f.exe.eq_ignore_ascii_case("tesela.exe"))
+                .then(|| (id, tesela_lib::infrastructure::windows::facts::window_rect(id).unwrap()))
         })
         .collect()
 }
@@ -53,7 +53,7 @@ fn la_barra_reserva_su_espacio_y_las_ventanas_no_se_le_encimas() {
     });
 
     let _app = App(
-        Command::new(env!("CARGO_BIN_EXE_window-manager"))
+        Command::new(env!("CARGO_BIN_EXE_tesela"))
             .args(["--manage", "prefix:WMTEST", "--bar"])
             .env("WM_CONFIG_DIR", &config)
             .env("WM_STATE_DIR", &state)

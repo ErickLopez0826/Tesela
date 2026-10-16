@@ -1,10 +1,10 @@
 [package]
-name = "window-manager"
+name = "tesela"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "window_manager_lib"
+name = "tesela_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
@@ -18,7 +18,7 @@ updater = ["dep:tauri-plugin-updater"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.9"
 serde_json = "1"
@@ -26,13 +26,19 @@ sysinfo = "0.38.4"
 tauri-plugin-updater = { version = "2", optional = true }
 
 [target.'cfg(windows)'.dependencies]
+# Hace falta para la macro `interface` (IPolicyConfig, la interfaz con la que Windows elige la salida de audio).
+windows-core = "0.62"
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Graphics_Dwm",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common",
   "Win32_Graphics_Gdi",
+  "Win32_Graphics_Imaging",
   "Win32_UI_Accessibility",
   "Win32_System_Performance",
   "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
   "Win32_System_DataExchange",
   "Win32_System_Memory",
   "Win32_System_Ole",
@@ -45,6 +51,10 @@ windows = { version = "0.62", features = [
   "Win32_UI_Shell_PropertiesSystem",
   "Media_Control",
   "Devices_Radios",
+  "Devices_WiFi",
+  "Devices_Bluetooth",
+  "Devices_Enumeration",
+  "Security_Credentials",
   "Networking_NetworkOperators",
   "Networking_Connectivity",
   "Foundation",
@@ -55,4 +65,6 @@ windows = { version = "0.62", features = [
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_System_Threading",
   "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Controls",
+  "Win32_Storage_Xps",
 ] }

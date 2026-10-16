@@ -2,7 +2,7 @@
 //! Sonda: ¿DwmSetWindowAttribute(DWMWA_CLOAK) funciona sobre ventanas de otro proceso?
 use windows::core::BOOL;
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE};
-use window_manager_lib::infrastructure::windows::facts::{facts_of, hwnd_from};
+use tesela_lib::infrastructure::windows::facts::{facts_of, hwnd_from};
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader};
 

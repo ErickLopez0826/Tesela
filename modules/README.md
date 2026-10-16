@@ -1,4 +1,4 @@
-# Módulos de Window Manager
+# Módulos de Tesela
 
 Un módulo es una carpeta con un `module.json` y una página web (HTML + JS + CSS). La app la muestra en un
 **iframe aislado**: no ve Windows, no ve Tauri y no puede salir de su carpeta. Todo lo que quiera del sistema lo
@@ -75,12 +75,10 @@ instala, usa y desinstala módulos con la app real.
 
 ## Módulos incluidos
 
-Además del ejemplo `examples/hello`, en esta carpeta hay cuatro módulos de utilidad listos para instalar desde la
-pestaña **Módulos** (indicando su carpeta):
+Además del ejemplo `examples/hello`, en esta carpeta hay un módulo de utilidad listo para instalar desde la
+pestaña **Módulos** (indicando su carpeta). Las notas, el portapapeles y las apps abiertas ya no son módulos: las notas
+son una pestaña propia del panel.
 
 | Módulo | Qué hace | Permisos |
 |---|---|---|
-| `notes` | Notas en Markdown o texto plano, un archivo por nota en su carpeta de datos | `files` |
-| `apps` | Lista de apps **abiertas** (saltar a una, fijarla) y **fijadas** (abrirlas); intercambiables | `windows`, `launch`, `files` |
-| `clipboard` | Historial de los últimos textos copiados; un clic vuelve a copiar. Hueco opcional en la barra | `clipboard`, `files` |
 | `speedtest` | Prueba de velocidad con el CLI de Ookla en segundo plano y últimos resultados | `speedtest`, `files` |

@@ -15,7 +15,7 @@ use windows::Win32::System::Threading::{
     PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetDesktopWindow, GetParent, GetWindow, GetWindowLongW, GetWindowRect,
+    EnumWindows, GetClassNameW, GetDesktopWindow, GetForegroundWindow, GetParent, GetWindow, GetWindowLongW, GetWindowRect,
     GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, GWL_EXSTYLE,
     GWL_STYLE, GW_OWNER, MONITORINFOF_PRIMARY, WS_CAPTION, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
@@ -228,5 +228,47 @@ pub fn exe_path_of(id: isize) -> Option<String> {
         let _ = CloseHandle(process);
         result.ok()?;
         Some(String::from_utf16_lossy(&buf[..len as usize]))
+    }
+}
+
+/// Ventana en primer plano que merece un resaltado: visible, sin minimizar, sin ocultar por DWM, que no sea el
+/// escritorio ni parte del shell de Windows, ni una ventana propia (salvo la principal) ni una a pantalla completa.
+/// Devuelve su rectángulo visible (sin sombra), en píxeles físicos.
+pub fn highlight_target() -> Option<Rect> {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() || !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+            return None;
+        }
+        let mut cloaked = 0u32;
+        let _ = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut _ as *mut _, size_of::<u32>() as u32);
+        if cloaked != 0 {
+            return None;
+        }
+        const SHELL: [&str; 9] = [
+            "Progman",
+            "WorkerW",
+            "Shell_TrayWnd",
+            "Shell_SecondaryTrayWnd",
+            "NotifyIconOverflowWindow",
+            "TopLevelWindowForOverflowXamlIsland",
+            "XamlExplorerHostIslandWindow",
+            "Windows.UI.Core.CoreWindow",
+            "ForegroundStaging",
+        ];
+        if SHELL.contains(&class_name(hwnd).as_str()) {
+            return None;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid == GetCurrentProcessId() && window_title(hwnd) != "Tesela" {
+            return None;
+        }
+        let id = id_of(hwnd);
+        if fullscreen_state(id).is_some_and(|(full, _)| full) {
+            return None;
+        }
+        let r = visible_frame(id).or_else(|| window_rect(id))?;
+        (r.w > 40 && r.h > 40).then_some(r)
     }
 }

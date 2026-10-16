@@ -568,6 +568,7 @@ pub mod fakes {
     impl OverviewProvider for OkOverview {
         fn read(&mut self) -> SystemOverview {
             SystemOverview {
+                hardware: Default::default(),
                 cpu_percent: 12.0,
                 gpu_percent: None,
                 ram_used: 1,
@@ -697,7 +698,9 @@ pub mod fakes {
             // El adaptador real de energía está detrás del modo seguro, como en producción.
             power: Mutex::new(Box::new(Guarded::new(FakePower(power_calls.clone()), false))),
             radios: Mutex::new(Box::new(NoRadios)),
+            network: Mutex::new(Box::new(crate::application::system::NoNetwork)),
             wallpaper: Mutex::new(Box::new(NoWall)),
+            engine: Mutex::new(Box::new(crate::infrastructure::windows::system::wallpaper_engine::NoEngine)),
             volume: Mutex::new(Box::new(NoVol)),
             overview: Mutex::new(overview),
             clipboard: Mutex::new(Box::new(FakeClipboard(clip_calls.clone()))),

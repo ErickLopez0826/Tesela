@@ -12,7 +12,7 @@ const base: GeneralStatus = {
   autostart_enabled: false,
   autostart_command: null,
   config_dir: "C:\\Users\\x\\AppData\\Roaming\\window-manager",
-  bundled_modules_dir: "C:\\Program Files\\Window Manager\\modules",
+  bundled_modules_dir: "C:\\Program Files\\Tesela\\modules",
   updater_compiled: false,
 };
 
@@ -33,7 +33,7 @@ describe("GeneralPanel", () => {
     expect(screen.getByText("0.1.0")).toBeTruthy();
     expect(screen.getAllByText("inactivo")).toHaveLength(1);
     expect(screen.getByText("inactiva")).toBeTruthy();
-    expect(screen.getByText("C:\\Program Files\\Window Manager\\modules")).toBeTruthy();
+    expect(screen.getByText("C:\\Program Files\\Tesela\\modules")).toBeTruthy();
   });
 
   it("activar el gestor pide confirmación y reinicia con gestor y barra", async () => {

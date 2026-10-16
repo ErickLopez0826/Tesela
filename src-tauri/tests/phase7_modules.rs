@@ -12,7 +12,7 @@ mod common;
 use std::path::Path;
 
 use common::e2e::*;
-use window_manager_lib::domain::modules::Permission;
+use tesela_lib::domain::modules::Permission;
 
 #[test]
 #[ignore]

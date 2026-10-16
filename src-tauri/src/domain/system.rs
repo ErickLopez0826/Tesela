@@ -91,6 +91,75 @@ pub struct RadioState {
     pub on: bool,
 }
 
+/// Red Wi-Fi a la vista (una por nombre, con la mejor señal).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WifiNetwork {
+    pub ssid: String,
+    /// Señal de 0 a 100.
+    pub signal: u8,
+    pub secured: bool,
+    pub connected: bool,
+}
+
+/// Dispositivo Bluetooth emparejado.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BluetoothDevice {
+    pub id: String,
+    pub name: String,
+    pub connected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HotspotClient {
+    pub name: String,
+    pub mac: String,
+}
+
+/// Configuración de compartir red y quién está conectado.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HotspotInfo {
+    pub ssid: String,
+    pub passphrase: String,
+    pub clients: Vec<HotspotClient>,
+    pub max_clients: u32,
+}
+
+/// Dispositivo de salida de audio.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AudioDevice {
+    pub id: String,
+    pub name: String,
+    pub default: bool,
+}
+
+/// Fondo de la biblioteca de Wallpaper Engine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EngineWallpaper {
+    /// Carpeta del fondo (con «/»): identifica al fondo y es lo único que se acepta para aplicarlo.
+    pub id: String,
+    pub title: String,
+    /// «scene», «video», «web», «application»… (en minúsculas; vacío si no se sabe).
+    pub kind: String,
+    /// Ruta absoluta de la imagen de previsualización, si tiene.
+    pub preview: Option<String>,
+}
+
+/// Qué fondo tiene Wallpaper Engine puesto en un monitor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EngineCurrent {
+    pub monitor: u32,
+    pub id: String,
+}
+
+/// Biblioteca de Wallpaper Engine tal como la ve la interfaz.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+pub struct EngineLibrary {
+    /// `false` si Wallpaper Engine no está instalado.
+    pub available: bool,
+    pub items: Vec<EngineWallpaper>,
+    pub current: Vec<EngineCurrent>,
+}
+
 // ----- Medios -----
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -136,6 +205,10 @@ pub struct ProcessUsage {
     pub name: String,
     pub cpu_percent: f32,
     pub ram_bytes: u64,
+    /// Uso de la gráfica (0-100); 0 si el equipo no expone el dato.
+    pub gpu_percent: f32,
+    /// Lectura + escritura en disco, en bytes por segundo.
+    pub disk_bytes_per_sec: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -145,8 +218,24 @@ pub struct DiskUsage {
     pub total: u64,
 }
 
+/// Especificaciones que no cambian mientras la app corre: procesador y tarjeta gráfica.
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
+pub struct HardwareSpecs {
+    /// Nombre comercial del procesador (p. ej. «AMD Ryzen 7 7840HS with Radeon 780M Graphics»).
+    pub cpu_name: String,
+    pub cpu_cores: usize,
+    pub cpu_threads: usize,
+    /// Frecuencia base/actual informada por Windows, en MHz (0 si no se conoce).
+    pub cpu_mhz: u64,
+    /// Nombre de la tarjeta gráfica dedicada más potente (o la integrada si no hay otra).
+    pub gpu_name: Option<String>,
+    /// Memoria de vídeo dedicada en bytes (0 en gráficas integradas que comparten RAM).
+    pub gpu_vram: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SystemOverview {
+    pub hardware: HardwareSpecs,
     pub cpu_percent: f32,
     /// `None` si no se pudo leer (el equipo no lo expone).
     pub gpu_percent: Option<f32>,

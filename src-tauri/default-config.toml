@@ -1,4 +1,4 @@
-# Configuración de Window Manager.
+# Configuración de Tesela.
 # Se lee al arrancar y al recargar con alt+shift+r. Si tiene errores, se conserva la anterior.
 # Los atajos son los del config.yaml de GlazeWM (sección 8 del plan), sin cambios.
 
@@ -17,10 +17,15 @@ float_height = 0.7
 
 # Módulos de sistema y de acción (panel desplegable).
 [system]
-# false (recomendado al probar): apagar, suspender, reiniciar, hibernar y cambiar Wi-Fi, Bluetooth o
-# compartir red se SIMULAN: el panel los muestra pero no tocan el equipo. Ponlo en true para usarlos de
-# verdad y reinicia la app.
-allow_changes = false
+# true: apagar, suspender, reiniciar, hibernar y cambiar Wi-Fi, Bluetooth o compartir red actúan de
+# verdad desde el panel (la energía siempre pide confirmación). Ponlo en false para que solo se
+# SIMULEN (el panel los muestra pero no tocan el equipo) y reinicia la app.
+allow_changes = true
+# true: al cambiar de fondo con Wallpaper Engine se dibuja una transición (un círculo que se abre desde el
+# cursor, detrás de tus ventanas). false: el cambio es directo. Requiere reiniciar la app.
+wallpaper_transition = true
+# true: al cambiar de workspace las ventanas del actual suben mientras bajan las del nuevo. false: el cambio es directo.
+workspace_transition = true
 
 # Workspaces ligados a monitores (0 = el de más a la izquierda).
 [[workspace]]

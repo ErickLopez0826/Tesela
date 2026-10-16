@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Window Manager",
+  "productName": "Tesela",
   "version": "0.1.0",
   "identifier": "com.erick.windowmanager",
   "build": {
@@ -10,8 +10,8 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "Window Manager", "width": 900, "height": 600 }],
-    "security": { "csp": null }
+    "windows": [{ "title": "Tesela", "width": 900, "height": 600 }],
+    "security": { "csp": null, "assetProtocol": { "enable": true, "scope": [] } }
   },
   "bundle": {
     "active": true,

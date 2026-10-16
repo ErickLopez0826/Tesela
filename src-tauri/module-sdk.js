@@ -1,4 +1,4 @@
-/* SDK de módulos de Window Manager. Lo sirve el núcleo en /__wm/sdk.js: los módulos no lo copian.
+/* SDK de módulos de Tesela. Lo sirve el núcleo en /__wm/sdk.js: los módulos no lo copian.
  *
  * El módulo corre en un iframe aislado (sandbox, sin acceso a Windows ni a Tauri). Todo lo que quiera
  * del sistema lo pide al núcleo con `wm.call(método, parámetros)`; el núcleo comprueba sus permisos.

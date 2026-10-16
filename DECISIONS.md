@@ -116,3 +116,55 @@ Decisiones tomadas durante el desarrollo autónomo. Las marcadas **(por defecto,
 - **D-71 Compilación de producción.** Opción `custom-protocol` incrusta la interfaz (`dist`). El instalador y las pruebas de producción la usan; el desarrollo sigue usando el servidor de Vite.
 - **D-72 Actualizaciones tras una opción de compilación.** `--features updater` activa el plugin oficial de Tauri; sin ella los comandos explican que no están disponibles. Necesita clave de firma y servidor de versiones: nada de eso existe ni se creó (BLOCKERS B-11).
 - **D-73 Nada se publica ni se firma.** Ni instalador, ni claves, ni releases, ni repositorio remoto.
+
+- **D-71 Transición de fondo dibujada por la app.** Wallpaper Engine tiene `browsetransition` vacío, así que cambia de golpe. La app dibuja su propia transición estilo «grow» de Hyprland: una ventana Win32 por monitor, hija de la ventana que aloja el fondo (`WorkerW`, la que contiene la ventana de `wallpaper64.exe`), colocada justo encima del dibujo de Wallpaper Engine y por debajo de iconos y apps. Muestra la **previsualización** del fondo nuevo (no es posible obtener un fotograma real antes de que Wallpaper Engine lo aplique) en un círculo que se abre desde el cursor (`SetWindowRgn`, ≈ 900 ms), se queda hasta que `config.json` de Wallpaper Engine anota el fondo nuevo (+ 1,2 s, tope 6 s) y se desvanece. Si no se encuentra el anfitrión o algo falla, no se dibuja nada y el cambio se hace igual. Se apaga con `[system] wallpaper_transition = false`. Los monitores de Wallpaper Engine se numeran de izquierda a derecha, como en la app.
+- **D-72 Color adaptado al fondo.** El modo «Adaptar al fondo» toma el color de la previsualización del fondo que Wallpaper Engine tiene puesto en el monitor 0 (el fondo de Windows es una copia casi negra), eligiendo el tono más presente aunque sea apagado y subiendo su viveza.
+
+
+## D-73 — Barra: título con desplazamiento, workspaces animados, separadores de 3 puntos
+- El título de la ventana activa va en una caja un 35 % más estrecha (`Marquee.svelte`); si no cabe, va y viene por todo el espacio con pausas en los extremos. Con movimiento reducido se corta con puntos suspensivos.
+- Los workspaces viven en `WorkspaceStrip.svelte` (no en `BarView`, donde la propiedad `state` choca con la runa `$state`). Una pastilla desliza entre ellos con las mismas curvas que la pestaña del panel; los nuevos caen desde arriba (`drop`) y los vecinos se apartan con un FLIP propio (`el.animate?.()`, para no depender de `animate:flip` en jsdom). No hay animación de salida: los vecinos cierran el hueco.
+- Entre CPU, RAM, GPU, temperatura, volumen y hora hay tres puntos apilados estilo Nothing (un solo `radial-gradient`).
+
+## D-74 — Audio en Conectividad, botón de medios con el tema, título centrado, fondos de 3 filas
+- `AudioPicker` esperaba `outputs`/`setOutput` pero recibía `systemApi` (que tiene `audioOutputs`/`audioSetOutput`): ahora hay un adaptador real, `audioApi`, con una prueba que lo comprueba. El botón «Salida: …» vive en Conectividad.
+- «Hoy» ya no muestra humedad ni viento. El botón de pausa/reproducir usa `--accent`/`--on-accent`.
+- El título se centra con una rejilla simétrica `1fr auto 1fr` (la anterior tenía columnas laterales distintas).
+- Fondos: 18 por página (3 filas de 6).
+
+## D-75 — La transición de fondo es una ventana propia al fondo del orden z (corrige D-71)
+- La capa como hija de la ventana que aloja el fondo NO se veía: se midió un píxel de pantalla con una capa magenta y Wallpaper Engine (DirectX) queda por encima de las ventanas hermanas, tengan el orden que tengan. Además `SetWindowPos` con «insertar después de X» la ponía detrás, no delante.
+- Ahora es una ventana `WS_POPUP` (sin foco, transparente a los clics) en `HWND_BOTTOM`: encima del escritorio y del fondo, debajo de cualquier ventana normal. Se midió: el píxel se ve magenta, sigue así tras volver a aplicar el fondo y no tapa ventanas. Coste: durante la transición también tapa los iconos del escritorio.
+- Las pruebas en vivo activan el DPI por monitor (el ejecutable de pruebas no lleva el manifiesto de la app).
+
+## D-76 — Animación de cambio de workspace con miniaturas de DWM
+- `Desktop::switch_workspace` anota una `Transition { area, out, inn }` (se recoge con `take_transition`). El controlador coloca las ventanas que entran (siguen ocultas), llama a `slide_begin`, aplica el resto de efectos y llama a `slide_end`.
+- `infrastructure/windows/slide.rs` dibuja una miniatura DWM por ventana en una capa de vidrio sobre el área útil: las que salen suben, las que entran bajan desde arriba (300 ms, cúbica). Las ventanas reales no se mueven. Se comprobó con ventanas propias que la miniatura de una ventana oculta (`cloak`) funciona y que al terminar queda en su sitio. Si algo falla no hay animación y el cambio se hace como siempre. `[system] workspace_transition = false` la apaga.
+- Mientras dura (~350 ms) el controlador espera; los atajos se encolan.
+
+## D-77 — Cierre del panel con la apertura al revés
+- Rust emite `wm-panel-closing` y oculta la ventana a los 460 ms (se cancela si se vuelve a abrir). La vista reproduce `drop` en sentido inverso.
+
+## D-78 — Consumo de CPU y GPU: el borde de la ventana activa era el culpable
+- **Medido** (proceso gráfico de WebView2 de la app: ~110 % de un núcleo; un renderizador ~25 %): el borde animaba una sombra y un degradado cónico, así que repintaba casi una pantalla en cada fotograma. Y al ocultarlo con `hide()` su WebView seguía animando (WebView2 no se entera): por eso el consumo no bajaba al quitar el foco.
+- Medición en Edge con la misma página a 1888×1008: borde antiguo ≈ 80 % de GPU; solo con `opacity`/`transform` ≈ 30 %; además a 25 fotogramas por segundo (`steps(80)` en 3,2 s) ≈ 9 % (casi lo mismo que una página en blanco). Cada fotograma cuesta lo mismo aunque cambie poco, así que lo que importa es cuántos se producen.
+- Ventanas ocultas (borde sin ventana activa, panel cerrado): `interface/webview.rs::set_visible` pone `IsVisible = false` en el WebView de WebView2, que deja de pintar y frena los temporizadores.
+- Las lecturas periódicas (`createPollingStore`, estadísticas, tema, reloj del panel, salidas de audio) no consultan nada mientras la ventana está oculta y leen enseguida al mostrarse.
+- `overview` reutiliza la última lectura durante 1,5 s (dos barras y el panel recorrían todos los procesos por separado); el hilo de la GPU mide cada 3 s en vez de 2; el color del fondo se guarda por ruta y fecha de la imagen.
+- Panel: el destello del volumen solo corre al pasar el cursor; los puntos de «Hoy» y el texto desplazable de la barra van a unos 25 fotogramas por segundo.
+- El borde se coloca con una sola llamada (`SetWindowPos`) en vez de mover y luego cambiar el tamaño (había un instante con el borde pequeño en el sitio nuevo).
+
+## D-79 — Logotipo de la aplicación
+- El original es `assets/logo-original.jpg` (cuadrado negro redondeado sobre fondo gris). `assets/logo.png` es el recorte del cuadrado a 1024×1024 con las esquinas transparentes. Con `npx tauri icon assets/logo.png` se generan `src-tauri/icons/*` (`icon.ico` con 16–256 px, `icon.icns`, los PNG y los logos de Store/MSIX); se borraron las carpetas de Android e iOS.
+- Aparece en: el `.exe` (Explorador, barra de tareas, Administrador de tareas, arranque con Windows), el icono de la bandeja y de las ventanas, el instalador, la pestaña del WebView (`public/logo.png`, 256 px) y la cabecera de la ventana principal.
+- Cambiar solo los iconos no hizo que Cargo volviera a incrustarlos: hay que tocar `build.rs` (ya hecho) o compilar limpio.
+
+## D-80 — Transición de fondos con el fondo real, audio como ficha, iconos del tiempo, páginas que se desplazan
+- **Dos fondos a la vez:** `PrintWindow(host, PW_RENDERFULLCONTENT)` sobre la ventana que aloja el fondo de Wallpaper Engine devuelve el fotograma completo y a su calidad (sin ventanas ni iconos encima; en `PrintWindow` sobre la propia ventana de DirectX sale negro). Se copia el fondo actual (~40 ms para 3000×1920), se pone esa copia congelada a pantalla completa, se pide el fondo nuevo y, cuando se ve por debajo (se compara una rejilla de píxeles de nuevo con la copia, o 1,2 s tras anotarse como puesto, o 4 s como tope), un agujero circular crece desde el cursor y deja ver el fondo nuevo en vivo. La previsualización solo queda como plan B si no se puede copiar el fondo.
+- Medido con la app abierta: la capa congelada se ve en el 100 % de los puntos libres que se muestrearon, coincide con el fondo copiado, no cambia con el tiempo y desaparece al terminar; no tapa ventanas.
+- Coste: durante la espera el fondo viejo está congelado y la capa tapa los iconos del escritorio.
+- Animación de entrada de ventanas al cambiar de workspace: 200 ms (antes 300).
+- El destello que recorre el borde de la ventana activa volvió: `contain: strict` recortaba justo la franja donde se dibuja. Sigue siendo solo `transform` a 25 fotogramas por segundo.
+- Salida de audio: ahora es una ficha más de Conectividad (como Wi-Fi, Bluetooth y Compartir red) con el dispositivo en uso como subtítulo; `AudioPicker` se sustituyó por `AudioDetails` (lista con el mismo aspecto).
+- El tiempo se muestra con iconos (`WeatherIcon`, `weatherKind`): sol, luna de noche, nube con sol, nube, niebla, llovizna, lluvia, nieve y tormenta; el nombre queda como etiqueta y ayuda.
+- Las páginas de fondos se desplazan según la dirección (la que sale queda como copia sin botones durante 340 ms).

@@ -1,0 +1,65 @@
+/* Estilo «Nothing» de la ventana principal: negro, puntos, acento rojo y tipografía mono. */
+:root {
+  --bg: #0a0a0b;
+  --fg: #f1f1f1;
+  --muted: #8b8b90;
+  --line: rgba(255, 255, 255, 0.14);
+  --panel: rgba(255, 255, 255, 0.04);
+  --accent: #f2f2f2;
+  --on-accent: #0a0a0b;
+  --mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+  color-scheme: dark;
+}
+
+html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--fg); }
+body { font: 14px/1.5 "Segoe UI", system-ui, sans-serif; }
+
+h1, h2, h3 { font-family: var(--mono); font-weight: 500; text-transform: uppercase; letter-spacing: 0.14em; }
+h1 { font-size: 15px; margin: 0 0 1rem; display: flex; align-items: center; gap: 10px; }
+h1::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); animation: wm-pulse 2.4s ease-in-out infinite; }
+h2, h3 { font-size: 12px; color: var(--muted); }
+
+a { color: var(--accent); }
+code, kbd { font-family: var(--mono); font-size: 0.85em; }
+code { color: #d6d6d8; }
+kbd { background: var(--panel); border: 1px solid var(--line) !important; border-radius: 6px !important; padding: 1px 6px !important; }
+::selection { background: var(--accent); color: var(--on-accent); }
+.hint { color: var(--muted); opacity: 1 !important; }
+.error { color: #ff5a5f !important; }
+.ok { color: #6fdc9a !important; }
+
+button {
+  font: 12px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer;
+  transition: background 0.35s ease, border-color 0.35s ease, transform 0.35s cubic-bezier(.3,1.6,.5,1), box-shadow 0.35s ease;
+}
+button:hover:not(:disabled) { border-color: var(--accent); background: rgba(255, 255, 255, 0.12); transform: translateY(-1px); box-shadow: 0 6px 18px -8px var(--accent); }
+button:active:not(:disabled) { transform: scale(0.95); }
+button:disabled { opacity: 0.35; cursor: default; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+input:not([type="checkbox"]):not([type="file"]) {
+  font: 13px var(--mono); color: var(--fg); background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line);
+  border-radius: 10px; padding: 7px 10px; transition: border-color 0.3s, box-shadow 0.3s;
+}
+input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18); outline: none; }
+input[type="checkbox"] { accent-color: var(--accent); }
+
+table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 12px; }
+th { color: var(--muted); font-weight: 400; text-transform: uppercase; letter-spacing: 0.12em; }
+th, td { border-bottom: 1px dotted var(--line) !important; }
+tbody tr { transition: background 0.3s; }
+tbody tr:hover { background: rgba(255, 255, 255, 0.05); }
+
+article, .preview { background: var(--panel); border-color: var(--line) !important; border-radius: 18px !important; backdrop-filter: blur(8px); transition: transform 0.4s ease, border-color 0.4s; }
+article:hover { border-color: rgba(255, 255, 255, 0.5) !important; }
+
+/* El contenido aparece como si subiera de un líquido. */
+main > :not(nav) { animation: wm-rise 0.55s cubic-bezier(.2,.8,.2,1) both; }
+
+@keyframes wm-rise { from { opacity: 0; transform: translateY(14px) scale(0.99); filter: blur(6px); } to { opacity: 1; transform: none; filter: blur(0); } }
+@keyframes wm-pulse { 50% { opacity: 0.35; transform: scale(0.8); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

@@ -54,6 +54,23 @@ const SHELL_CLASSES: &[&str] = &[
     "NotifyIconOverflowWindow",
     "TopLevelWindowForOverflowXamlIsland",
     "XamlExplorerHostIslandWindow",
+    // Ventanas nativas de la interfaz de Windows (avisos, buscador, entrada de texto): nunca son «aplicaciones».
+    "Windows.UI.Core.CoreWindow",
+    "ForegroundStaging",
+];
+
+/// Programas del propio Windows cuyas ventanas son superposiciones o avisos pasajeros, no ventanas de trabajo:
+/// la herramienta de captura (Win+Shift+S) y su aviso, el menú de inicio, el buscador, el teclado táctil...
+const SHELL_EXES: &[&str] = &[
+    "screenclippinghost.exe",
+    "shellexperiencehost.exe",
+    "startmenuexperiencehost.exe",
+    "searchhost.exe",
+    "searchapp.exe",
+    "textinputhost.exe",
+    "lockapp.exe",
+    "shellhost.exe",
+    "pickerhost.exe",
 ];
 
 /// Una ventana es candidata a gestión si es una ventana normal de aplicación
@@ -67,6 +84,7 @@ pub fn is_manageable(f: &WindowFacts, scope: &Scope) -> bool {
         && !f.own_process
         && !f.title.trim().is_empty()
         && !SHELL_CLASSES.contains(&f.class.as_str())
+        && !SHELL_EXES.contains(&f.exe.to_lowercase().as_str())
         && scope.allows(f)
 }
 
@@ -83,6 +101,19 @@ mod tests {
             visible: true,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn avisos_y_superposiciones_de_windows_no_se_gestionan() {
+        // Aviso de la captura de pantalla (Win+Shift+S) y otras ventanas pasajeras de la interfaz de Windows.
+        let toast = WindowFacts { class: "Windows.UI.Core.CoreWindow".into(), title: "Nueva notificación".into(), ..normal() };
+        assert!(!is_manageable(&toast, &Scope::All));
+        let clip = WindowFacts { exe: "ScreenClippingHost.exe".into(), title: "Captura".into(), ..normal() };
+        assert!(!is_manageable(&clip, &Scope::All));
+        let shell = WindowFacts { exe: "ShellExperienceHost.exe".into(), title: "Centro de notificaciones".into(), ..normal() };
+        assert!(!is_manageable(&shell, &Scope::All));
+        // Una aplicación normal con otro nombre de programa sigue siendo gestionable.
+        assert!(is_manageable(&WindowFacts { exe: "SnippingTool.exe".into(), ..normal() }, &Scope::All));
     }
 
     #[test]

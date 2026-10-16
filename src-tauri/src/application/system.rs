@@ -2,18 +2,23 @@
 //!
 //! Regla de seguridad (DECISIONS.md D-4 y D-39): apagar, suspender, reiniciar, hibernar y cambiar
 //! Wi-Fi/Bluetooth/compartir red SOLO se ejecutan de verdad si la configuración lo permite
-//! (`[system] allow_changes = true`). Por defecto se simulan, sin llamar al sistema.
+//! (`[system] allow_changes = true`, el valor por defecto). Con `false` se simulan, sin llamar al sistema.
 
 use std::sync::Mutex;
 
 use crate::domain::system::{
-    ActionOutcome, MediaCommand, MediaInfo, PowerAction, RadioKind, RadioState, SystemOverview, VolumeState,
+    ActionOutcome, AudioDevice, BluetoothDevice, EngineLibrary, HotspotInfo, MediaCommand, MediaInfo, PowerAction, RadioKind, RadioState,
+    SystemOverview, VolumeState, WifiNetwork,
 };
 use crate::domain::utility::{OpenApp, SpeedStatus};
 
 pub trait MediaControl: Send {
     fn now_playing(&mut self) -> Result<Option<MediaInfo>, String>;
     fn send(&mut self, command: MediaCommand) -> Result<ActionOutcome, String>;
+    /// Portada o miniatura de lo que suena, como «data:image/...;base64,...» (`None` si no la hay).
+    fn thumbnail(&mut self) -> Result<Option<String>, String> {
+        Ok(None)
+    }
 }
 
 pub trait PowerControl: Send {
@@ -32,10 +37,69 @@ pub trait WallpaperControl: Send {
     fn set(&mut self, path: &str) -> Result<ActionOutcome, String>;
 }
 
+/// Fondos de Wallpaper Engine: ver la biblioteca y pedirle que cambie de fondo.
+pub trait EngineControl: Send {
+    fn library(&mut self) -> EngineLibrary;
+    /// Aplica un fondo de la biblioteca (por su `id`), en un monitor o en todos.
+    fn apply(&mut self, id: &str, monitor: Option<u32>) -> Result<ActionOutcome, String>;
+    /// Previsualización (ruta de imagen) del fondo puesto en el monitor principal; de ahí sale el color de la interfaz.
+    fn current_preview(&mut self) -> Option<String> {
+        None
+    }
+    /// Qué fondo tiene puesto cada monitor ahora.
+    fn current(&mut self) -> Vec<crate::domain::system::EngineCurrent> {
+        vec![]
+    }
+}
+
 pub trait VolumeControl: Send {
     fn get(&mut self) -> Result<VolumeState, String>;
     fn set_percent(&mut self, percent: f32) -> Result<ActionOutcome, String>;
     fn set_muted(&mut self, muted: bool) -> Result<ActionOutcome, String>;
+    /// Dispositivos de salida de audio activos, con el predeterminado marcado.
+    fn outputs(&mut self) -> Result<Vec<AudioDevice>, String> {
+        Ok(vec![])
+    }
+    /// Cambia el dispositivo de salida predeterminado.
+    fn set_output(&mut self, _id: &str) -> Result<ActionOutcome, String> {
+        Err("este equipo no permite cambiar la salida de audio".into())
+    }
+}
+
+/// Redes Wi-Fi, dispositivos Bluetooth y zona compartida: ver, conectar y configurar.
+pub trait NetworkControl: Send {
+    /// Busca las redes a la vista (tarda unos segundos).
+    fn wifi_networks(&mut self) -> Result<Vec<WifiNetwork>, String>;
+    /// Conecta a una red; con contraseña si es nueva y está protegida.
+    fn wifi_connect(&mut self, ssid: &str, password: Option<&str>) -> Result<ActionOutcome, String>;
+    fn wifi_disconnect(&mut self) -> Result<ActionOutcome, String>;
+    fn bluetooth_devices(&mut self) -> Result<Vec<BluetoothDevice>, String>;
+    fn hotspot(&mut self) -> Result<Option<HotspotInfo>, String>;
+    fn hotspot_configure(&mut self, ssid: &str, passphrase: &str) -> Result<ActionOutcome, String>;
+}
+
+/// Sin red que gestionar (pruebas y equipos sin adaptador).
+pub struct NoNetwork;
+
+impl NetworkControl for NoNetwork {
+    fn wifi_networks(&mut self) -> Result<Vec<WifiNetwork>, String> {
+        Ok(vec![])
+    }
+    fn wifi_connect(&mut self, _: &str, _: Option<&str>) -> Result<ActionOutcome, String> {
+        Err("sin adaptador Wi-Fi".into())
+    }
+    fn wifi_disconnect(&mut self) -> Result<ActionOutcome, String> {
+        Err("sin adaptador Wi-Fi".into())
+    }
+    fn bluetooth_devices(&mut self) -> Result<Vec<BluetoothDevice>, String> {
+        Ok(vec![])
+    }
+    fn hotspot(&mut self) -> Result<Option<HotspotInfo>, String> {
+        Ok(None)
+    }
+    fn hotspot_configure(&mut self, _: &str, _: &str) -> Result<ActionOutcome, String> {
+        Err("sin zona compartida".into())
+    }
 }
 
 pub trait OverviewProvider: Send {
@@ -116,6 +180,50 @@ impl<T: RadioControl> RadioControl for Guarded<T> {
     }
 }
 
+impl<T: NetworkControl> NetworkControl for Guarded<T> {
+    fn wifi_networks(&mut self) -> Result<Vec<WifiNetwork>, String> {
+        self.inner.wifi_networks()
+    }
+    fn wifi_connect(&mut self, ssid: &str, password: Option<&str>) -> Result<ActionOutcome, String> {
+        if self.live {
+            self.inner.wifi_connect(ssid, password)
+        } else {
+            Ok(ActionOutcome::simulated(format!("Simulado: se habría conectado a {ssid}")))
+        }
+    }
+    fn wifi_disconnect(&mut self) -> Result<ActionOutcome, String> {
+        if self.live {
+            self.inner.wifi_disconnect()
+        } else {
+            Ok(ActionOutcome::simulated("Simulado: se habría desconectado del Wi-Fi"))
+        }
+    }
+    fn bluetooth_devices(&mut self) -> Result<Vec<BluetoothDevice>, String> {
+        self.inner.bluetooth_devices()
+    }
+    fn hotspot(&mut self) -> Result<Option<HotspotInfo>, String> {
+        self.inner.hotspot()
+    }
+    fn hotspot_configure(&mut self, ssid: &str, passphrase: &str) -> Result<ActionOutcome, String> {
+        if self.live {
+            self.inner.hotspot_configure(ssid, passphrase)
+        } else {
+            Ok(ActionOutcome::simulated("Simulado: se habría cambiado la configuración de compartir red"))
+        }
+    }
+}
+
+/// Nombre de red válido para la zona compartida (1-32 caracteres) y contraseña WPA2 (8-63).
+pub fn validate_hotspot(ssid: &str, passphrase: &str) -> Result<(), String> {
+    if ssid.trim().is_empty() || ssid.chars().count() > 32 {
+        return Err("el nombre de la red debe tener entre 1 y 32 caracteres".into());
+    }
+    if !(8..=63).contains(&passphrase.chars().count()) {
+        return Err("la contraseña debe tener entre 8 y 63 caracteres".into());
+    }
+    Ok(())
+}
+
 /// Imágenes disponibles en la carpeta de fondos, por nombre y en orden.
 pub fn list_wallpapers(dir: &std::path::Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir)
@@ -158,7 +266,9 @@ pub struct SystemServices {
     pub media: Mutex<Box<dyn MediaControl>>,
     pub power: Mutex<Box<dyn PowerControl>>,
     pub radios: Mutex<Box<dyn RadioControl>>,
+    pub network: Mutex<Box<dyn NetworkControl>>,
     pub wallpaper: Mutex<Box<dyn WallpaperControl>>,
+    pub engine: Mutex<Box<dyn EngineControl>>,
     pub volume: Mutex<Box<dyn VolumeControl>>,
     pub overview: Mutex<Box<dyn OverviewProvider>>,
     pub clipboard: Mutex<Box<dyn ClipboardControl>>,
@@ -271,5 +381,36 @@ mod tests {
         for bad in ["..\\playa.jpg", "../playa.jpg", "C:\\Windows\\a.png", "sub/playa.jpg", "..", ".", "", "virus.exe", "falta.png", "C:playa.jpg"] {
             assert!(resolve_wallpaper(&d, bad).is_err(), "'{bad}' debería rechazarse");
         }
+    }
+
+    #[test]
+    fn la_zona_compartida_valida_nombre_y_contrasena() {
+        assert!(validate_hotspot("MiPC", "12345678").is_ok());
+        assert!(validate_hotspot("", "12345678").is_err());
+        assert!(validate_hotspot(&"x".repeat(33), "12345678").is_err());
+        assert!(validate_hotspot("MiPC", "corta").is_err());
+        assert!(validate_hotspot("MiPC", &"x".repeat(64)).is_err());
+    }
+
+    #[test]
+    fn en_modo_seguro_conectar_o_configurar_la_red_se_simula() {
+        struct Spy(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+        impl NetworkControl for Spy {
+            fn wifi_networks(&mut self) -> Result<Vec<WifiNetwork>, String> { Ok(vec![]) }
+            fn wifi_connect(&mut self, s: &str, _: Option<&str>) -> Result<ActionOutcome, String> { self.0.lock().unwrap().push(format!("connect:{s}")); Ok(ActionOutcome::done("ok")) }
+            fn wifi_disconnect(&mut self) -> Result<ActionOutcome, String> { self.0.lock().unwrap().push("disconnect".into()); Ok(ActionOutcome::done("ok")) }
+            fn bluetooth_devices(&mut self) -> Result<Vec<BluetoothDevice>, String> { Ok(vec![]) }
+            fn hotspot(&mut self) -> Result<Option<HotspotInfo>, String> { Ok(None) }
+            fn hotspot_configure(&mut self, _: &str, _: &str) -> Result<ActionOutcome, String> { self.0.lock().unwrap().push("configure".into()); Ok(ActionOutcome::done("ok")) }
+        }
+        let log = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let mut safe = Guarded::new(Spy(log.clone()), false);
+        assert!(safe.wifi_connect("Casa", Some("x")).unwrap().simulated);
+        assert!(safe.wifi_disconnect().unwrap().simulated);
+        assert!(safe.hotspot_configure("a", "12345678").unwrap().simulated);
+        assert!(log.lock().unwrap().is_empty(), "nada llegó al sistema");
+        let mut live = Guarded::new(Spy(log.clone()), true);
+        assert!(!live.wifi_connect("Casa", None).unwrap().simulated);
+        assert_eq!(log.lock().unwrap().as_slice(), ["connect:Casa"]);
     }
 }

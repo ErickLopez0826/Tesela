@@ -15,12 +15,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SWP_NOOWNERZORDER, SWP_NOZORDER, SW_HIDE, SW_RESTORE, SW_SHOWNA, WM_CLOSE,
 };
 
-use crate::application::ports::WindowPlatform;
+use crate::application::ports::{SlideHandle, WindowPlatform};
+use crate::application::ports::DENIED;
 use crate::domain::actions::Action;
 use crate::domain::shortcuts::Chord;
 use crate::domain::snapshot::StateSnapshot;
+use crate::infrastructure::windows::slide;
 use crate::infrastructure::windows::runtime::{HotkeyRequest, HOTKEY_REQUEST, WM_APP_SET_HOTKEYS};
-use crate::domain::effects::{Effect, WindowId};
+use crate::domain::effects::{Effect, Transition, WindowId};
 use crate::domain::desktop::Monitor;
 use crate::domain::geometry::Rect;
 use crate::domain::manageable::WindowFacts;
@@ -149,7 +151,7 @@ impl Win32Platform {
         }
     }
 
-    fn place(id: WindowId, target: Rect) {
+    fn place(id: WindowId, target: Rect) -> Result<(), String> {
         unsafe {
             let hwnd = hwnd_from(id);
             if IsZoomed(hwnd).as_bool() {
@@ -164,13 +166,13 @@ impl Win32Platform {
             w += outer.w - vis.w;
             h += outer.h - vis.h;
         }
-        Self::set_pos(id, Rect::new(x, y, w, h));
+        Self::set_pos(id, Rect::new(x, y, w, h))
     }
 
     /// Posiciona el rectángulo exterior tal cual (sin compensar sombras).
-    fn set_pos(id: WindowId, r: Rect) {
+    fn set_pos(id: WindowId, r: Rect) -> Result<(), String> {
         unsafe {
-            let _ = SetWindowPos(
+            SetWindowPos(
                 hwnd_from(id),
                 None,
                 r.x,
@@ -178,7 +180,9 @@ impl Win32Platform {
                 r.w,
                 r.h,
                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
-            );
+            )
+            // Una ventana de un programa con más privilegios (p. ej. el Administrador de tareas) no se puede mover.
+            .map_err(|e| if e.code() == windows::Win32::Foundation::E_ACCESSDENIED { format!("{DENIED}: {e}") } else { e.message() })
         }
     }
 
@@ -246,7 +250,7 @@ impl WindowPlatform for Win32Platform {
                     return Ok(());
                 }
                 self.remember(id);
-                Self::place(id, *rect);
+                return Self::place(id, *rect);
             }
             Effect::Hide(_) => {
                 if self.hidden.contains_key(&id) {
@@ -331,6 +335,25 @@ impl WindowPlatform for Win32Platform {
         }
     }
 
+    fn slide_begin(&mut self, t: &Transition) -> Option<SlideHandle> {
+        // Solo las ventanas que existen y están en pantalla; el rectángulo de las que entran ya es el final (se colocaron).
+        let rects = |ids: &[WindowId]| -> Vec<(WindowId, Rect)> {
+            ids.iter()
+                .filter(|&&id| window_exists(id) && !unsafe { IsIconic(hwnd_from(id)).as_bool() })
+                .filter_map(|&id| window_rect(id).map(|r| (id, r)))
+                .collect()
+        };
+        let out: Vec<_> = rects(&t.out).into_iter().filter(|(id, _)| !self.hidden.contains_key(id)).collect();
+        let inn = rects(&t.inn);
+        slide::begin(t.area, out, inn).map(|s| SlideHandle(Box::new(s)))
+    }
+
+    fn slide_end(&mut self, handle: SlideHandle) {
+        if let Ok(slide) = handle.0.downcast::<slide::Slide>() {
+            slide.end();
+        }
+    }
+
     fn restore_all(&mut self) {
         let ids: Vec<WindowId> = self.hidden.keys().copied().collect();
         for id in ids {
@@ -340,7 +363,7 @@ impl WindowPlatform for Win32Platform {
         }
         for (&id, &r) in &self.originals {
             if window_exists(id) {
-                Self::set_pos(id, r);
+                let _ = Self::set_pos(id, r);
             }
         }
         self.originals.clear();

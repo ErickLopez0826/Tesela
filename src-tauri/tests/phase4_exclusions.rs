@@ -9,12 +9,12 @@ mod common;
 use std::sync::{Arc, Mutex};
 
 use common::*;
-use window_manager_lib::domain::geometry::Rect;
-use window_manager_lib::domain::manageable::Scope;
-use window_manager_lib::domain::rules::ExclusionList;
-use window_manager_lib::infrastructure::windows::facts::{list_monitors, primary_work_area, window_rect};
-use window_manager_lib::infrastructure::windows::platform::Callbacks;
-use window_manager_lib::infrastructure::windows::runtime::{Runtime, RuntimeOptions};
+use tesela_lib::domain::geometry::Rect;
+use tesela_lib::domain::manageable::Scope;
+use tesela_lib::domain::rules::ExclusionList;
+use tesela_lib::infrastructure::windows::facts::{list_monitors, primary_work_area, window_rect};
+use tesela_lib::infrastructure::windows::platform::Callbacks;
+use tesela_lib::infrastructure::windows::runtime::{Runtime, RuntimeOptions};
 
 #[test]
 #[ignore]
@@ -84,7 +84,7 @@ fn juego_y_app_excluida_conviven_con_el_gestor() {
     list.add("lively.exe", Some("GAME"));
     list.add("lively.exe", Some("borderless"));
     let pos_before = window_rect(managed_game.ids[0]).unwrap();
-    rt.send(window_manager_lib::application::controller::Message::SetExclusions(list));
+    rt.send(tesela_lib::application::controller::Message::SetExclusions(list));
     wait_until("las otras dos ocupan la mitad", || managed.ids.iter().all(|&id| (frame(id).w - area.w / 2).abs() <= 3));
     assert_eq!(window_rect(managed_game.ids[0]).unwrap(), pos_before, "la recién excluida se queda donde está");
 

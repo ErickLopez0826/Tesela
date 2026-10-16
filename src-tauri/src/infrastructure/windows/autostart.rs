@@ -15,16 +15,19 @@ use windows::Win32::System::Registry::{
 /// Clave de arranque real de Windows para el usuario actual.
 pub const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 /// Nombre del valor de esta app.
-pub const VALUE_NAME: &str = "WindowManager";
+pub const VALUE_NAME: &str = "Tesela";
 
 /// Línea de comandos con la que arrancará la app: ruta entre comillas y los argumentos de gestión y barra.
-pub fn command_line(exe: &Path, manage_all: bool, bar: bool) -> String {
+pub fn command_line(exe: &Path, manage_all: bool, bar: bool, background: bool) -> String {
     let mut c = format!("\"{}\"", exe.display());
     if manage_all {
         c.push_str(" --manage all");
     }
     if bar {
         c.push_str(" --bar");
+    }
+    if background {
+        c.push_str(" --background");
     }
     c
 }
@@ -112,20 +115,20 @@ mod tests {
 
     #[test]
     fn linea_de_comandos_con_comillas_y_argumentos() {
-        let exe = Path::new(r"C:\Program Files\Window Manager\window-manager.exe");
+        let exe = Path::new(r"C:\Program Files\Tesela\tesela.exe");
         assert_eq!(
-            command_line(exe, true, true),
-            r#""C:\Program Files\Window Manager\window-manager.exe" --manage all --bar"#
+            command_line(exe, true, true, true),
+            r#""C:\Program Files\Tesela\tesela.exe" --manage all --bar --background"#
         );
-        assert_eq!(command_line(exe, false, true), r#""C:\Program Files\Window Manager\window-manager.exe" --bar"#);
-        assert_eq!(command_line(exe, false, false), r#""C:\Program Files\Window Manager\window-manager.exe""#);
+        assert_eq!(command_line(exe, false, true, false), r#""C:\Program Files\Tesela\tesela.exe" --bar"#);
+        assert_eq!(command_line(exe, false, false, false), r#""C:\Program Files\Tesela\tesela.exe""#);
     }
 
     /// Usa una clave PROPIA de pruebas bajo HKCU y la borra al terminar: el arranque real de Windows no se toca.
     #[test]
     fn activar_consultar_y_desactivar_en_una_clave_de_pruebas() {
-        let key = format!(r"Software\WindowManagerTests\Run-{}", std::process::id());
-        let cmd = command_line(Path::new(r"C:\Apps\wm.exe"), true, true);
+        let key = format!(r"Software\TeselaTests\Run-{}", std::process::id());
+        let cmd = command_line(Path::new(r"C:\Apps\wm.exe"), true, true, true);
         assert_eq!(status(&key, VALUE_NAME), None);
         enable(&key, VALUE_NAME, &cmd).unwrap();
         assert_eq!(status(&key, VALUE_NAME).as_deref(), Some(cmd.as_str()));
@@ -135,7 +138,7 @@ mod tests {
         disable(&key, VALUE_NAME).unwrap();
         assert_eq!(status(&key, VALUE_NAME), None);
         disable(&key, VALUE_NAME).unwrap(); // desactivar dos veces no falla
-        delete_tree(r"Software\WindowManagerTests");
+        delete_tree(r"Software\TeselaTests");
         assert_eq!(status(&key, VALUE_NAME), None);
     }
 

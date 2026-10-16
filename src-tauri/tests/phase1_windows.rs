@@ -8,15 +8,15 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::channel;
 use std::time::{Duration, Instant};
 
-use window_manager_lib::application::controller::Message;
-use window_manager_lib::domain::actions::Action;
-use window_manager_lib::domain::geometry::Rect;
-use window_manager_lib::domain::manageable::Scope;
-use window_manager_lib::infrastructure::windows::facts::{
+use tesela_lib::application::controller::Message;
+use tesela_lib::domain::actions::Action;
+use tesela_lib::domain::geometry::Rect;
+use tesela_lib::domain::manageable::Scope;
+use tesela_lib::infrastructure::windows::facts::{
     facts_of, hwnd_from, primary_work_area, visible_frame, window_exists, window_rect,
 };
-use window_manager_lib::infrastructure::windows::platform::recover_cloaked_windows;
-use window_manager_lib::infrastructure::windows::runtime::Runtime;
+use tesela_lib::infrastructure::windows::platform::recover_cloaked_windows;
+use tesela_lib::infrastructure::windows::runtime::Runtime;
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY,

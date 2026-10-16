@@ -15,6 +15,8 @@ pub struct CliArgs {
     pub recover: bool,
     /// Muestra la barra de cada monitor (reserva espacio en pantalla).
     pub bar: bool,
+    /// Arranca sin mostrar la ventana principal: solo el icono de la bandeja (lo usa el arranque con Windows).
+    pub background: bool,
     /// Prueba de extremo a extremo de un módulo instalado: la ventana principal lo carga, anota lo que
     /// pide a la API del núcleo y escribe el informe en `WM_SELFTEST_OUT` (solo para pruebas).
     pub selftest_module: Option<String>,
@@ -33,6 +35,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<CliArgs, St
             }
             "--recover" => out.recover = true,
             "--bar" => out.bar = true,
+            "--background" => out.background = true,
             "--delay-ms" => {
                 out.delay_ms = it.next().and_then(|v| v.parse().ok()).ok_or("--delay-ms necesita un número")?;
             }
@@ -136,6 +139,7 @@ pub fn run() {
                 module_api.clone(),
                 last_state.clone(),
             );
+            state.wallpaper_transition = config.system.wallpaper_transition;
             state.general = interface::commands::GeneralInfo { managing: args.manage.is_some(), bar: args.bar };
             if let Some(id) = &args.selftest_module {
                 state.selftest = Some(interface::commands::SelfTest {
@@ -160,10 +164,12 @@ pub fn run() {
             interface::commands::run_action,
             interface::commands::open_panel,
             interface::commands::close_panel,
+            interface::commands::panel_resize,
             interface::commands::system_mode,
             interface::commands::overview,
             interface::commands::media_now,
             interface::commands::media_command,
+            interface::commands::media_thumbnail,
             interface::commands::volume_get,
             interface::commands::volume_set,
             interface::commands::volume_mute,
@@ -172,6 +178,26 @@ pub fn run() {
             interface::commands::power_run,
             interface::commands::wallpapers_list,
             interface::commands::wallpaper_set,
+            interface::commands::notes_list,
+            interface::commands::notes_add,
+            interface::commands::notes_update,
+            interface::commands::notes_delete,
+            interface::commands::notes_export,
+            interface::commands::notes_open_folder,
+            interface::commands::clipboard_read,
+            interface::commands::clipboard_write,
+            interface::commands::engine_library,
+            interface::commands::engine_apply,
+            interface::commands::wifi_networks,
+            interface::commands::wifi_connect,
+            interface::commands::wifi_disconnect,
+            interface::commands::bluetooth_devices,
+            interface::commands::hotspot_info,
+            interface::commands::hotspot_configure,
+            interface::commands::audio_outputs,
+            interface::commands::audio_set_output,
+            interface::commands::open_windows_settings,
+            interface::commands::wallpaper_color,
             interface::commands::modules_list,
             interface::commands::modules_preview,
             interface::commands::modules_install,
@@ -191,6 +217,22 @@ pub fn run() {
             *handle_slot.lock().unwrap() = Some(app.handle().clone());
             #[cfg(windows)]
             setup_windows(app, &args, &store, config.clone(), warning.clone(), &focus_sink);
+            // Las miniaturas del selector de fondos se leen de su carpeta (y solo de ella).
+            {
+                let dir = app.state::<interface::commands::AppState>().wallpapers_dir.clone();
+                let _ = std::fs::create_dir_all(&dir);
+                let _ = app.asset_protocol_scope().allow_directory(&dir, false);
+            }
+            // Y las previsualizaciones de Wallpaper Engine, de sus carpetas de fondos.
+            #[cfg(windows)]
+            if let Some(engine) = infrastructure::windows::system::wallpaper_engine::WallpaperEngine::detect() {
+                for dir in engine.source_dirs() {
+                    let _ = app.asset_protocol_scope().allow_directory(dir, true);
+                }
+            }
+            if args.selftest_module.is_none() {
+                interface::tray::setup(app, args.background);
+            }
             let _ = (&app, &args);
             Ok(())
         })
@@ -207,6 +249,10 @@ pub fn run() {
                         rt.stop();
                     }
                 }
+                // Con todo ya devuelto a su sitio, termina sin esperar al desmontaje de WebView2: evita que una
+                // instancia que se cierra se quede colgada (y compita con la nueva en barras y atajos) y el aviso
+                // «Failed to unregister class Chrome_WidgetWin_0».
+                std::process::exit(0);
             }
         }
     });
@@ -231,7 +277,7 @@ fn setup_windows(
     let handle = app.handle().clone();
 
     if args.bar {
-        interface::bar::sync_bars(&handle, &infrastructure::windows::facts::list_monitors());
+        interface::bar::start_hover_trigger(&handle);
         // Vigila conexiones y desconexiones de monitores para crear y retirar barras.
         let watcher = handle.clone();
         std::thread::spawn(move || {
@@ -239,6 +285,9 @@ fn setup_windows(
                 v.iter().map(|m| (m.id, m.bounds, m.dpi_scale.to_bits())).collect::<Vec<_>>()
             };
             let mut last = infrastructure::windows::facts::list_monitors();
+            // Las barras y la isla se crean desde este hilo, no desde `setup` (hilo principal): crear varias
+            // ventanas web seguidas ahí dentro bloquea el arranque («no responde»).
+            interface::bar::sync_bars(&watcher, &last);
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 // Solo cuenta la geometría real del monitor; el área útil cambia al acoplar nuestras barras.
@@ -250,6 +299,10 @@ fn setup_windows(
                 }
             }
         });
+    }
+
+    if args.bar || args.manage.is_some() {
+        interface::focus_border::start(&handle);
     }
 
     let Some(scope) = args.manage.clone() else { return };
@@ -332,6 +385,12 @@ mod tests {
     fn manage_invalido_falla() {
         assert!(parse_args(a(&["--manage", "xx"])).is_err());
         assert!(parse_args(a(&["--manage"])).is_err());
+    }
+
+    #[test]
+    fn background_se_reconoce() {
+        assert!(parse_args(a(&["--background"])).unwrap().background);
+        assert!(!parse_args(a(&[])).unwrap().background);
     }
 
     #[test]

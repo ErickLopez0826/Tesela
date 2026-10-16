@@ -31,17 +31,40 @@ pub fn command_for(action: PowerAction) -> PowerCommand {
     }
 }
 
+/// Texto de error legible cuando `shutdown` falla. La salida de la consola de Windows no es UTF-8, así que se
+/// conserva solo el ASCII imprimible.
+fn failure_message(action: PowerAction, stdout: &[u8], stderr: &[u8]) -> String {
+    if action == PowerAction::Hibernate {
+        return "no se pudo hibernar: puede que la hibernación no esté activada (actívala con «powercfg /h on» en una consola de administrador)".into();
+    }
+    let raw: String = String::from_utf8_lossy(if stderr.is_empty() { stdout } else { stderr })
+        .chars()
+        .filter(|c| c.is_ascii_graphic() || *c == ' ')
+        .collect();
+    let detail = raw.trim();
+    if detail.is_empty() {
+        format!("Windows rechazó la orden de {}", action.label())
+    } else {
+        format!("Windows rechazó la orden de {}: {detail}", action.label())
+    }
+}
+
 pub struct LivePower;
 
 impl PowerControl for LivePower {
     fn run(&mut self, action: PowerAction) -> Result<ActionOutcome, String> {
         match command_for(action) {
             PowerCommand::Exe(program, args) => {
-                std::process::Command::new(program)
+                // Se espera al código de salida: `shutdown` vuelve enseguida y así un fallo (p. ej. hibernación
+                // desactivada) llega al panel en vez de darse por hecho.
+                let output = std::process::Command::new(program)
                     .args(args)
                     .creation_flags(NO_WINDOW)
-                    .spawn()
+                    .output()
                     .map_err(|e| format!("no se pudo ejecutar {program}: {e}"))?;
+                if !output.status.success() {
+                    return Err(failure_message(action, &output.stdout, &output.stderr));
+                }
             }
             PowerCommand::Suspend => unsafe {
                 // bHibernate = false: suspensión normal.
@@ -64,6 +87,14 @@ mod tests {
         assert_eq!(command_for(PowerAction::Restart), PowerCommand::Exe("shutdown", &["/r", "/t", "0"]));
         assert_eq!(command_for(PowerAction::Hibernate), PowerCommand::Exe("shutdown", &["/h"]));
         assert_eq!(command_for(PowerAction::Suspend), PowerCommand::Suspend);
+    }
+
+    #[test]
+    fn los_errores_de_energia_se_explican() {
+        assert!(failure_message(PowerAction::Hibernate, b"", b"").contains("powercfg /h on"));
+        assert!(failure_message(PowerAction::Restart, b"", b"").starts_with("Windows rechazó"));
+        let m = failure_message(PowerAction::Shutdown, b"", b"Acceso denegado (5).\xe9");
+        assert!(m.contains("Acceso denegado (5)."), "{m}");
     }
 
     #[test]

@@ -64,12 +64,25 @@ pub struct KeybindingConfig {
 }
 
 /// Ajustes de los módulos de sistema y de acción.
-#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct SystemConfig {
-    /// Si es `false` (por defecto), apagar/suspender/reiniciar/hibernar y cambiar Wi-Fi/Bluetooth/compartir
-    /// red se simulan. Cambiarlo requiere reiniciar la app.
+    /// Si es `true` (por defecto), apagar/suspender/reiniciar/hibernar y cambiar Wi-Fi/Bluetooth/compartir
+    /// red actúan de verdad (la energía siempre pide confirmación en el panel). Con `false` se simulan.
+    /// Cambiarlo requiere reiniciar la app.
     pub allow_changes: bool,
+    /// Si es `true` (por defecto), al cambiar de fondo con Wallpaper Engine se dibuja una transición (círculo que se abre
+    /// desde el cursor). Con `false` el cambio es directo.
+    pub wallpaper_transition: bool,
+    /// Si es `true` (por defecto), al cambiar de workspace las ventanas del actual suben mientras bajan las del nuevo.
+    /// Con `false` el cambio es directo.
+    pub workspace_transition: bool,
+}
+
+impl Default for SystemConfig {
+    fn default() -> Self {
+        SystemConfig { allow_changes: true, wallpaper_transition: true, workspace_transition: true }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
@@ -176,6 +189,7 @@ impl Config {
                     vertical_axis,
                     bindings,
                     float_size: (l.float_width, l.float_height),
+                    workspace_transition: self.system.workspace_transition,
                 },
                 keymap,
                 rules: self.window_rules.clone(),
@@ -201,6 +215,15 @@ mod tests {
         assert_eq!(v.settings.vertical_axis, Axis::Rows);
         assert_eq!(v.settings.horizontal_axis, Axis::Columns);
         assert!(v.keymap.global().is_empty());
+    }
+
+    #[test]
+    fn los_cambios_de_sistema_estan_permitidos_salvo_que_se_desactiven() {
+        assert!(Config::default().system.allow_changes);
+        assert!(toml::from_str::<Config>("").unwrap().system.allow_changes);
+        assert!(!toml::from_str::<Config>("[system]\nallow_changes = false").unwrap().system.allow_changes);
+        assert!(Config::default().system.wallpaper_transition);
+        assert!(!toml::from_str::<Config>("[system]\nwallpaper_transition = false").unwrap().system.wallpaper_transition);
     }
 
     #[test]

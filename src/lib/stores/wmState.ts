@@ -1,5 +1,6 @@
 import { writable } from "svelte/store";
 import * as api from "../api/state";
+import { isHidden, onShown } from "./polling";
 import type { StateSnapshot, SystemStats, WorkspaceSnapshot } from "../api/state";
 
 /** Workspaces que muestra la barra de un monitor: los suyos que están visibles o tienen ventanas. */
@@ -22,8 +23,10 @@ export function formatGb(bytes: number): string {
 
 export function formatClock(now: Date, withSeconds = false): string {
   const two = (n: number) => String(n).padStart(2, "0");
-  const base = `${two(now.getHours())}:${two(now.getMinutes())}`;
-  return withSeconds ? `${base}:${two(now.getSeconds())}` : base;
+  const hour = now.getHours() % 12 || 12;
+  const base = `${hour}:${two(now.getMinutes())}`;
+  const suffix = now.getHours() < 12 ? "AM" : "PM";
+  return `${withSeconds ? `${base}:${two(now.getSeconds())}` : base} ${suffix}`;
 }
 
 export interface StateBackend {
@@ -69,15 +72,20 @@ export function createStatsStore(backend: StatsBackend = { read: api.systemStats
     }
   }
 
+  let stopListening: (() => void) | null = null;
+
   function start() {
     if (timer) return;
     void tick();
-    timer = setInterval(tick, intervalMs);
+    timer = setInterval(() => !isHidden() && void tick(), intervalMs);
+    stopListening = onShown(tick);
   }
 
   function stop() {
     if (timer) clearInterval(timer);
     timer = null;
+    stopListening?.();
+    stopListening = null;
   }
 
   return { subscribe, start, stop };

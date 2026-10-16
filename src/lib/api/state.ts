@@ -57,6 +57,21 @@ export function closePanel(): Promise<void> {
   return invoke<void>("close_panel");
 }
 
+/** Ajusta el alto de la ventana del panel al de la pestaña visible. */
+export function panelResize(height: number): Promise<void> {
+  return invoke("panel_resize", { height });
+}
+
+/** El panel desplegable se acaba de mostrar (la ventana se reutiliza, así que no se vuelve a montar). */
+export function onPanelShown(callback: () => void): Promise<UnlistenFn> {
+  return listen("wm-panel-shown", () => callback());
+}
+
+/** El panel empieza a cerrarse: la vista reproduce su animación al revés y la ventana se oculta poco después. */
+export function onPanelClosing(callback: () => void): Promise<UnlistenFn> {
+  return listen("wm-panel-closing", () => callback());
+}
+
 export function onState(callback: (state: StateSnapshot) => void): Promise<UnlistenFn> {
   return listen<StateSnapshot>("wm-state", (e) => callback(e.payload));
 }

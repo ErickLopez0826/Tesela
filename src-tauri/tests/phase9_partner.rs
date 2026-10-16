@@ -11,7 +11,7 @@ mod common;
 use std::path::Path;
 
 use common::e2e::*;
-use window_manager_lib::domain::modules::Permission;
+use tesela_lib::domain::modules::Permission;
 
 fn partner_dir() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../modules/partner")

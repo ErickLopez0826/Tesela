@@ -1,0 +1,39 @@
+/* Es una aplicación, no una página: el texto no se selecciona (ni se pone azul) ni las imágenes se arrastran. Solo se
+   puede seleccionar donde se escribe. */
+html { -webkit-user-select: none; user-select: none; }
+input, textarea, [contenteditable="true"] { -webkit-user-select: text; user-select: text; }
+img { -webkit-user-drag: none; user-drag: none; }
+
+/* Botones «líquidos»: luz que sigue al cursor y onda al pulsar (ver lib/ui/fluid.ts). */
+button:not(.island), .fluid {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+button:not(.island)::before, .fluid::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(110px circle at var(--fx, 50%) var(--fy, 50%), rgba(255, 255, 255, 0.2), transparent 70%);
+  transition: opacity 0.4s ease;
+}
+
+button:not(.island):hover::before, .fluid:hover::before { opacity: 1; }
+
+/* Onda del clic: nace en el cursor y se difumina al crecer. */
+.ink {
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.12) 60%, transparent 72%);
+  transform: scale(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:not(.island)::before, .fluid::before { transition: none; }
+}

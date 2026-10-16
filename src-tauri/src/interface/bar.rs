@@ -1,10 +1,13 @@
 //! Ventanas de la barra (una por monitor, acopladas como AppBar) y del panel desplegable (§9).
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::utils::config::WindowEffectsConfig;
+use tauri::window::Effect;
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 use crate::domain::desktop::Monitor;
 use crate::infrastructure::windows::appbar;
@@ -12,12 +15,25 @@ use crate::infrastructure::windows::facts::list_monitors;
 
 /// Alto de la barra en píxeles lógicos (se escala con el DPI de cada monitor).
 pub const BAR_HEIGHT: f64 = 40.0;
-const PANEL_SIZE: (f64, f64) = (420.0, 780.0);
+const PANEL_SIZE: (f64, f64) = (940.0, 400.0);
+/// Ancho (lógico) de la zona central de la barra que abre el panel al acercar el cursor.
+const HOVER_HALF_WIDTH: f64 = 150.0;
+/// Tiempo con el cursor en la zona antes de abrir (evita aperturas por pasar de largo).
+const HOVER_DWELL: Duration = Duration::from_millis(160);
+/// Tiempo fuera del panel y de la zona antes de cerrarlo.
+const HOVER_LEAVE: Duration = Duration::from_millis(450);
 const PANEL_MARGIN: f64 = 12.0;
 const PANEL_LABEL: &str = "panel";
 
 /// Cuándo se ocultó el panel por perder el foco: evita que el clic en el botón de la barra lo reabra al instante.
 static PANEL_HID_AT: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// El panel se está cerrando (la vista reproduce su animación al revés) y aún no se ha ocultado la ventana.
+static PANEL_CLOSING: AtomicBool = AtomicBool::new(false);
+/// Sube cada vez que el panel se vuelve a abrir: un cierre pendiente con otra generación se cancela.
+static PANEL_GEN: AtomicU64 = AtomicU64::new(0);
+/// Lo que tarda la animación de cierre de la vista (algo más, por si el sistema va justo).
+const PANEL_CLOSE_MS: u64 = 460;
 
 fn bar_label(monitor: u32) -> String {
     format!("bar-{monitor}")
@@ -46,8 +62,11 @@ pub fn sync_bars(app: &AppHandle, monitors: &[Monitor]) {
             None => {
                 let url = WebviewUrl::App(format!("index.html?view=bar&monitor={}", m.id).into());
                 WebviewWindowBuilder::new(app, &label, url)
-                    .title("Window Manager Bar")
+                    .title("Tesela Bar")
                     .decorations(false)
+                    .transparent(true)
+                    // Desenfoque ligero de lo que hay detrás de la barra (el tinte lo pone la propia vista).
+                    .effects(WindowEffectsConfig { effects: vec![Effect::Blur], state: None, radius: None, color: None, interactive: false })
                     .resizable(false)
                     .skip_taskbar(true)
                     .always_on_top(true)
@@ -87,18 +106,25 @@ pub fn undock_all(app: &AppHandle) {
 
 /// Abre o cierra el panel desplegable en el monitor indicado (§9.2).
 pub fn toggle_panel(app: &AppHandle, monitor: u32) {
+    open_panel_thread(app, monitor, true);
+}
+
+fn open_panel_thread(app: &AppHandle, monitor: u32, focus: bool) {
     // Crear una ventana desde el hilo principal bloquea el bucle de eventos (el webview necesita ese
     // mismo hilo para terminar de crearse), así que se hace desde un hilo aparte.
     let handle = app.clone();
-    let _ = std::thread::Builder::new().name("wm-panel".into()).spawn(move || toggle_panel_inner(&handle, monitor));
+    let _ = std::thread::Builder::new().name("wm-panel".into()).spawn(move || toggle_panel_inner(&handle, monitor, focus));
 }
 
-fn toggle_panel_inner(app: &AppHandle, monitor: u32) {
+fn toggle_panel_inner(app: &AppHandle, monitor: u32, focus: bool) {
     eprintln!("[wm] alternar panel en el monitor {monitor}");
     let existing = app.get_webview_window(PANEL_LABEL);
-    if let Some(w) = &existing {
+    if PANEL_CLOSING.swap(false, Ordering::SeqCst) {
+        // Se vuelve a pedir mientras se cerraba: se cancela el cierre y se vuelve a abrir.
+        PANEL_GEN.fetch_add(1, Ordering::SeqCst);
+    } else if let Some(w) = &existing {
         if w.is_visible().unwrap_or(false) {
-            let _ = w.hide();
+            begin_hide(app);
             return;
         }
     }
@@ -115,8 +141,9 @@ fn toggle_panel_inner(app: &AppHandle, monitor: u32) {
         None => {
             let url = WebviewUrl::App("index.html?view=panel".into());
             let built = WebviewWindowBuilder::new(app, PANEL_LABEL, url)
-                .title("Window Manager Panel")
+                .title("Tesela Panel")
                 .decorations(false)
+                .transparent(true)
                 .resizable(false)
                 .skip_taskbar(true)
                 .always_on_top(true)
@@ -128,11 +155,11 @@ fn toggle_panel_inner(app: &AppHandle, monitor: u32) {
                     if let Some(h) = hwnd_of(&w) {
                         appbar::make_tool_window(h);
                     }
-                    let w2 = w.clone();
+                    let app2 = app.clone();
                     w.on_window_event(move |ev| {
                         if let WindowEvent::Focused(false) = ev {
                             eprintln!("[wm] el panel perdió el foco: se oculta");
-                            let _ = w2.hide();
+                            begin_hide(&app2);
                             *PANEL_HID_AT.lock().unwrap() = Some(Instant::now());
                         }
                     });
@@ -148,18 +175,151 @@ fn toggle_panel_inner(app: &AppHandle, monitor: u32) {
     let s = m.dpi_scale;
     let (w, h) = ((PANEL_SIZE.0 * s) as u32, (PANEL_SIZE.1 * s) as u32);
     let margin = (PANEL_MARGIN * s) as i32;
-    // Justo debajo de la barra (el área útil ya empieza ahí) y pegado a la derecha del monitor.
-    let x = m.bounds.right() - w as i32 - margin;
+    // Justo debajo de la barra (el área útil ya empieza ahí) y centrado en el monitor.
+    let x = m.work_area.x + (m.work_area.w - w as i32) / 2;
     let y = m.work_area.y + margin;
     let _ = window.set_size(PhysicalSize::new(w, h));
     let _ = window.set_position(PhysicalPosition::new(x, y));
+    crate::interface::webview::set_visible(&window, true);
     let _ = window.show();
-    let _ = window.set_focus();
+    // Abierto con el cursor no roba el foco a la app en uso.
+    if focus {
+        let _ = window.set_focus();
+    }
+    // La ventana se reutiliza: la vista relanza así su animación de aparición.
+    let _ = window.emit("wm-panel-shown", ());
 }
 
-/// Cierra el panel (Escape o botón).
-pub fn hide_panel(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window(PANEL_LABEL) {
-        let _ = w.hide();
+/// Cambia el alto del panel (lógico) conservando su borde superior y su centro.
+pub fn resize_panel(app: &AppHandle, height: f64) {
+    let Some(w) = app.get_webview_window(PANEL_LABEL) else { return };
+    let scale = w.scale_factor().unwrap_or(1.0);
+    let Ok(size) = w.inner_size() else { return };
+    let h = (height.clamp(120.0, 900.0) * scale).round() as u32;
+    if h != size.height {
+        let _ = w.set_size(PhysicalSize::new(size.width, h));
     }
+}
+
+/// Cierra el panel (Escape o botón) con su animación.
+pub fn hide_panel(app: &AppHandle) {
+    begin_hide(app);
+}
+
+/// ¿El panel está en pantalla y no se está cerrando?
+fn panel_open(app: &AppHandle) -> bool {
+    !PANEL_CLOSING.load(Ordering::SeqCst)
+        && app.get_webview_window(PANEL_LABEL).is_some_and(|w| w.is_visible().unwrap_or(false))
+}
+
+/// Empieza el cierre: avisa a la vista para que reproduzca la apertura al revés y, pasado el tiempo de la animación,
+/// oculta la ventana. Si el panel se vuelve a abrir mientras tanto, no se oculta.
+fn begin_hide(app: &AppHandle) {
+    let Some(w) = app.get_webview_window(PANEL_LABEL) else { return };
+    if !w.is_visible().unwrap_or(false) || PANEL_CLOSING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let generation = PANEL_GEN.load(Ordering::SeqCst);
+    let _ = w.emit("wm-panel-closing", ());
+    let _ = std::thread::Builder::new().name("wm-panel-close".into()).spawn(move || {
+        std::thread::sleep(Duration::from_millis(PANEL_CLOSE_MS));
+        if PANEL_GEN.load(Ordering::SeqCst) == generation && PANEL_CLOSING.swap(false, Ordering::SeqCst) {
+            let _ = w.hide();
+            // Oculto no debe consultar el sistema ni animar nada: se duerme su WebView hasta que se vuelva a abrir.
+            crate::interface::webview::set_visible(&w, false);
+        }
+    });
+}
+
+fn cursor_pos() -> Option<(i32, i32)> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    let mut p = POINT::default();
+    unsafe { GetCursorPos(&mut p).ok()? };
+    Some((p.x, p.y))
+}
+
+/// ¿La ventana que hay bajo el cursor es la propia barra? Si hay otra encima (la barra de herramientas de la captura
+/// de pantalla, un menú, una app que se sale de su sitio...), el cursor no está «en la barra» y el panel no debe abrirse.
+fn bar_is_under_cursor(bar: &tauri::WebviewWindow, x: i32, y: i32) -> bool {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, WindowFromPoint, GA_ROOT};
+    let Some(bar_hwnd) = hwnd_of(bar) else { return false };
+    unsafe {
+        let hit = WindowFromPoint(POINT { x, y });
+        if hit.0.is_null() {
+            return false;
+        }
+        GetAncestor(hit, GA_ROOT).0 as isize == bar_hwnd
+    }
+}
+
+/// Abre el panel al acercar el cursor al centro de la barra y lo cierra al alejarlo. Solo si la barra de ese
+/// monitor está visible (no abre nada sobre un juego o una app a pantalla completa).
+pub fn start_hover_trigger(app: &AppHandle) {
+    let app = app.clone();
+    let _ = std::thread::Builder::new().name("wm-panel-hover".into()).spawn(move || {
+        let mut dwell = Duration::ZERO;
+        let mut armed = true;
+        let mut by_hover = false;
+        let mut outside_since: Option<Instant> = None;
+        let tick = Duration::from_millis(40);
+        loop {
+            std::thread::sleep(tick);
+            let Some((cx, cy)) = cursor_pos() else { continue };
+            let monitors = list_monitors();
+            let zone = monitors.iter().find(|m| {
+                let half = (HOVER_HALF_WIDTH * m.dpi_scale) as i32;
+                let mid = m.bounds.x + m.bounds.w / 2;
+                let bar_h = (BAR_HEIGHT * m.dpi_scale).round() as i32;
+                cx >= mid - half
+                    && cx <= mid + half
+                    && cy >= m.bounds.y
+                    && cy < m.bounds.y + bar_h
+                    && app
+                        .get_webview_window(&bar_label(m.id))
+                        .is_some_and(|b| b.is_visible().unwrap_or(false) && bar_is_under_cursor(&b, cx, cy))
+            });
+            let panel = app.get_webview_window(PANEL_LABEL);
+            let visible = panel_open(&app);
+            if !visible {
+                by_hover = false;
+            }
+
+            if let Some(m) = zone {
+                outside_since = None;
+                if !armed || visible {
+                    dwell = Duration::ZERO;
+                    continue;
+                }
+                dwell += tick;
+                if dwell >= HOVER_DWELL {
+                    dwell = Duration::ZERO;
+                    armed = false;
+                    by_hover = true;
+                    open_panel_thread(&app, m.id, false);
+                }
+                continue;
+            }
+            // Fuera de la zona: se vuelve a armar (así Escape o un cierre no lo reabren mientras el cursor sigue ahí).
+            dwell = Duration::ZERO;
+            armed = true;
+            if by_hover && visible {
+                let inside = panel
+                    .as_ref()
+                    .and_then(|w| Some((w.outer_position().ok()?, w.outer_size().ok()?)))
+                    .is_some_and(|(p, sz)| {
+                        let pad = 14;
+                        cx >= p.x - pad && cx <= p.x + sz.width as i32 + pad && cy >= p.y - pad && cy <= p.y + sz.height as i32 + pad
+                    });
+                if inside {
+                    outside_since = None;
+                } else if outside_since.get_or_insert_with(Instant::now).elapsed() >= HOVER_LEAVE {
+                    hide_panel(&app);
+                    by_hover = false;
+                    outside_since = None;
+                }
+            }
+        }
+    });
 }

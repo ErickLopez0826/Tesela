@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { merida } from "../stores/weather";
+  import { refreshWallpaperTheme } from "../stores/theme";
   import { onDestroy, onMount } from "svelte";
-  import { closePanel, runAction } from "../api/state";
-  import { systemApi } from "../api/system";
+  import { closePanel, onPanelClosing, onPanelShown, panelResize, runAction } from "../api/state";
+  import { audioApi, notesApi, systemApi } from "../api/system";
   import type { ActionOutcome, SystemMode } from "../api/system";
   import PanelView from "../components/PanelView.svelte";
-  import { createPollingStore } from "../stores/polling";
+  import { createPollingStore, isHidden, onShown } from "../stores/polling";
   import { createModulesStore } from "../stores/modules";
   import { createStateStore } from "../stores/wmState";
 
@@ -15,25 +17,65 @@
   const volume = createPollingStore(systemApi.volumeGet, 3000);
   const radios = createPollingStore(systemApi.radioStates, 5000);
   const wallpapers = createPollingStore(systemApi.wallpapersList, 30000);
+  const engine = createPollingStore(systemApi.engineLibrary, 20000);
 
   let now = $state(new Date());
   let mode: SystemMode = $state({ allow_changes: false });
   let clock: ReturnType<typeof setInterval>;
+  let openTick = $state(0);
+  let closeTick = $state(0);
+  // La portada se pide solo cuando cambia la canción (puede pesar decenas de KB).
+  let mediaArt: string | null = $state(null);
+  let artKey = "";
+  let unlistenShown: (() => void) | undefined;
+  let unlistenClosing: (() => void) | undefined;
+  let stopShown: (() => void) | undefined;
 
   onMount(() => {
+    onPanelShown(() => openTick++).then((u) => (unlistenShown = u)).catch(() => {});
+    onPanelClosing(() => closeTick++).then((u) => (unlistenClosing = u)).catch(() => {});
     void stateStore.start();
     void modules.start();
-    for (const s of [overview, media, volume, radios, wallpapers]) s.start();
-    clock = setInterval(() => (now = new Date()), 1000);
+    for (const s of [overview, media, volume, radios, wallpapers, engine]) s.start();
+    // El reloj del panel solo corre mientras se ve.
+    clock = setInterval(() => !isHidden() && (now = new Date()), 1000);
+    stopShown = onShown(() => (now = new Date()));
     systemApi.mode().then((m) => (mode = m)).catch(() => {});
   });
 
   onDestroy(() => {
     stateStore.stop();
     modules.stop();
-    for (const s of [overview, media, volume, radios, wallpapers]) s.stop();
+    for (const s of [overview, media, volume, radios, wallpapers, engine]) s.stop();
     clearInterval(clock);
+    unlistenShown?.();
+    unlistenClosing?.();
+    stopShown?.();
   });
+
+  $effect(() => {
+    const m = $media;
+    const key = m ? `${m.app}|${m.artist}|${m.title}` : "";
+    if (key === artKey) return;
+    artKey = key;
+    if (!m) {
+      mediaArt = null;
+      return;
+    }
+    systemApi.mediaThumbnail().then((a) => (mediaArt = key === artKey ? a : mediaArt)).catch(() => (mediaArt = null));
+  });
+
+  // WinRT tarda un momento en reflejar el nuevo estado de una radio: se vuelve a leer poco después.
+  async function refreshRadios() {
+    await radios.refresh();
+    setTimeout(() => void radios.refresh(), 1500);
+  }
+
+  // Wallpaper Engine tarda un instante en anotar el fondo nuevo en su configuración.
+  async function refreshEngine() {
+    // Cuando Wallpaper Engine ya anotó el fondo nuevo, la interfaz toma su color (modo «Adaptar al fondo»).
+    for (const ms of [1500, 4000]) setTimeout(() => (void engine.refresh(), refreshWallpaperTheme()), ms);
+  }
 
   async function after<T>(op: Promise<T>, refresh: () => Promise<void>): Promise<T> {
     try {
@@ -54,12 +96,23 @@
   wallpapers={$wallpapers}
   allowChanges={mode.allow_changes}
   modules={$modules}
+  {openTick}
+  {closeTick}
+  {mediaArt}
+  weather={$merida}
+  onResize={(h) => void panelResize(h).catch(() => {})}
   onWorkspace={(n) => void runAction(`workspace_${n}`).catch(() => {})}
   onClose={() => void closePanel()}
   onMediaCommand={(c) => void after(systemApi.mediaCommand(c), media.refresh).catch(() => {})}
   onVolume={(p) => void after(systemApi.volumeSet(p), volume.refresh).catch(() => {})}
   onMute={(m) => void after(systemApi.volumeMute(m), volume.refresh).catch(() => {})}
-  onRadio={(k, on): Promise<ActionOutcome> => after(systemApi.radioSet(k, on), radios.refresh)}
+  onRadio={(k, on): Promise<ActionOutcome> => after(systemApi.radioSet(k, on), refreshRadios)}
   onPower={(a): Promise<ActionOutcome> => systemApi.powerRun(a)}
+  network={systemApi}
+  notes={notesApi}
+  engine={$engine}
+  onEngineApply={(id, m) => after(systemApi.engineApply(id, m), refreshEngine)}
+  audio={audioApi}
+  onAudioChanged={() => void volume.refresh()}
   onWallpaper={(n): Promise<ActionOutcome> => after(systemApi.wallpaperSet(n), wallpapers.refresh)}
 />
