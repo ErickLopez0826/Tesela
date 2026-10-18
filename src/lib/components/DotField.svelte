@@ -61,7 +61,8 @@
     background: var(--bg, #0a0a0b);
     transition: --mx 0.22s cubic-bezier(.2, .9, .3, 1), --my 0.22s cubic-bezier(.2, .9, .3, 1), --lit 0.5s ease;
   }
-  .field.contained { position: absolute; z-index: 0; }
+  /* Dentro del panel no pinta fondo: el tinte (y lo que se ve a través) lo pone el propio panel. */
+  .field.contained { position: absolute; z-index: 0; background: transparent; }
   .field :global(.dots) { position: absolute; inset: 0; background-size: 18px 18px; }
   .base { background-image: radial-gradient(circle, rgba(var(--dot, 255, 255, 255), 0.14) 1px, transparent 1.4px); }
   .lit {

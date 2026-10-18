@@ -11,6 +11,8 @@ pub mod modules;
 pub mod rules;
 pub mod shortcuts;
 pub mod snapshot;
+pub mod startup;
 pub mod system;
+pub mod tasks;
 pub mod utility;
 pub mod window;

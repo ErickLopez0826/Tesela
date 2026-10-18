@@ -6,6 +6,10 @@
   import WorkspaceStrip from "./WorkspaceStrip.svelte";
   import Marquee from "./Marquee.svelte";
   import ModuleFrame from "./ModuleFrame.svelte";
+  import GlassBackdrop from "./GlassBackdrop.svelte";
+  import WeatherIcon from "./WeatherIcon.svelte";
+  import { describeWeather } from "../stores/weather";
+  import { theme } from "../stores/theme";
   import { formatClock, formatPercent, ramPercent, workspacesFor } from "../stores/wmState";
 
   let {
@@ -16,6 +20,7 @@
     volume = null,
     gpu = null,
     temperature = null,
+    weatherCode = null,
     modules = [],
     onWorkspace,
     onMute = () => {},
@@ -27,12 +32,16 @@
     volume?: VolumeState | null;
     gpu?: number | null;
     temperature?: number | null;
+    /** Código WMO del tiempo actual: la barra lo muestra como icono junto a la temperatura. */
+    weatherCode?: number | null;
     modules?: InstalledModule[];
     onWorkspace: (number: number) => void;
     onMute?: (muted: boolean) => void;
   } = $props();
 
   const workspaces = $derived(workspacesFor(state, monitorId));
+  // De noche el cielo despejado se muestra como luna.
+  const night = $derived(now.getHours() < 6 || now.getHours() >= 19);
   const barModules = $derived(modules.filter((m) => m.enabled && m.manifest.ui.bar));
 
   // Datos de la derecha en orden; entre cada par visible va un separador de tres puntos.
@@ -47,6 +56,8 @@
 </script>
 
 <div class="bar">
+  <GlassBackdrop kind="bar" blur={$theme.barBlur} />
+  <div class="tint" aria-hidden="true"></div>
   <div class="zone left">
     <WorkspaceStrip {workspaces} {onWorkspace} />
     {#if state?.mode}<span class="badge">modo {state.mode}</span>{/if}
@@ -72,7 +83,10 @@
       {:else if key === "gpu" && gpu !== null}
         <span class="stat" title="Tarjeta gráfica">GPU {formatPercent(gpu)}</span>
       {:else if key === "temp" && temperature !== null}
-        <span class="stat" title="Temperatura en Mérida">Mérida {Math.round(temperature)} °C</span>
+        <span class="stat weather" title={weatherCode === null ? "Temperatura" : describeWeather(weatherCode)} role="img" aria-label={weatherCode === null ? `${Math.round(temperature)} °C` : `${describeWeather(weatherCode)}, ${Math.round(temperature)} °C`}>
+          {#if weatherCode !== null}<WeatherIcon code={weatherCode} night={night} size={17} />{/if}
+          {Math.round(temperature)} °C
+        </span>
       {:else if key === "vol" && volume}
         <button class="stat vol" aria-label={volume.muted ? "Activar sonido" : "Silenciar"} onclick={() => onMute(!volume.muted)}>
           <Icon name={volume.muted ? "volume-off" : "volume"} size={14} /> {Math.round(volume.percent)}%
@@ -93,14 +107,19 @@
     height: 100vh;
     padding: 0 10px;
     box-sizing: border-box;
-    background-color: rgba(10, 10, 11, 0.58);
+    position: relative;
+    overflow: hidden;
     border-bottom: 1px solid rgba(255, 255, 255, 0.12);
     color: #f1f1f1;
     font: 12px/1 "Cascadia Mono", Consolas, ui-monospace, monospace;
     letter-spacing: 0.04em;
     user-select: none;
   }
-  .zone { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  /* Tinte del cristal: su opacidad es la de Personalización. Las zonas van por encima. */
+  .tint { position: absolute; inset: 0; z-index: 0; pointer-events: none; background: rgba(10, 10, 11, var(--bar-alpha, 0.58)); }
+  .weather { display: inline-flex; align-items: center; gap: 6px; }
+  .weather :global(.weather-icon) { filter: none; color: inherit; }
+  .zone { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
   .left { justify-content: flex-start; position: relative; }
   .center { justify-content: center; overflow: hidden; opacity: 0.85; }
   .title { width: clamp(120px, 30vw, 560px); min-width: 0; }

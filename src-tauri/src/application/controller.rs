@@ -6,7 +6,8 @@ use crate::domain::config::ValidConfig;
 use crate::domain::desktop::{Desktop, Settings, TrackOptions};
 use crate::domain::effects::{Effect, WindowId};
 use crate::domain::manageable::{is_manageable, Scope};
-use crate::domain::rules::{apply_rules, ExclusionList, WindowRule};
+use crate::domain::rules::{apply_rules, normalize_exe, ExclusionList, WindowRule};
+use std::time::{Duration, Instant};
 use crate::domain::shortcuts::Keymap;
 use crate::domain::snapshot::{FocusedSnapshot, StateSnapshot};
 
@@ -33,6 +34,18 @@ pub enum Message {
     Tick,
     /// Cierre de la app: restaura y deja de gestionar.
     Shutdown,
+    /// Se acaban de abrir aplicaciones de arranque: sus ventanas nuevas se mandan a su workspace.
+    ExpectStartup(Vec<StartupExpect>),
+}
+
+/// Una aplicación de arranque cuya ventana se espera: la ventana nueva de ese ejecutable va a `workspace` (0..8)
+/// durante `ttl`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartupExpect {
+    /// Nombre normalizado del ejecutable (sin `.exe`, en minúsculas).
+    pub exe: String,
+    pub workspace: usize,
+    pub ttl: Duration,
 }
 
 /// Lee y valida la configuración actual (archivo en producción).
@@ -46,6 +59,8 @@ pub struct Controller<P: WindowPlatform> {
     keymap: Keymap,
     exclusions: ExclusionList,
     rules: Vec<WindowRule>,
+    /// Aplicaciones de arranque a la espera de su ventana: (ejecutable, workspace, hasta cuándo).
+    startup: Vec<(String, usize, Instant)>,
     mode: Option<String>,
     loader: Option<ConfigLoader>,
     paused: bool,
@@ -79,6 +94,7 @@ impl<P: WindowPlatform> Controller<P> {
             keymap,
             exclusions,
             rules,
+            startup: Vec::new(),
             mode: None,
             loader: None,
             paused: false,
@@ -138,15 +154,26 @@ impl<P: WindowPlatform> Controller<P> {
             return;
         }
         let outcome = apply_rules(&self.rules, &facts);
+        let excluded = self.exclusions.matches(&facts);
+        // Las reglas de ventana mandan; si no hay ninguna, una aplicación de arranque va a su workspace.
+        let workspace = outcome.workspace.or_else(|| if excluded { None } else { self.startup_workspace(&facts.exe) });
         let opts = TrackOptions {
-            excluded: self.exclusions.matches(&facts),
+            excluded,
             fullscreen: facts.fullscreen,
             monitor: facts.monitor,
-            workspace: outcome.workspace,
+            workspace,
             float: outcome.float,
         };
         let fx = self.desk.track_window(id, opts);
         self.run(fx);
+    }
+
+    /// Workspace (0..8) de una aplicación de arranque cuya ventana aún se espera; olvida las que caducaron.
+    fn startup_workspace(&mut self, exe: &str) -> Option<usize> {
+        let now = Instant::now();
+        self.startup.retain(|(_, _, until)| *until > now);
+        let exe = normalize_exe(exe);
+        self.startup.iter().find(|(e, _, _)| *e == exe).map(|(_, ws, _)| *ws)
     }
 
     /// Publica el estado para la interfaz solo cuando cambió.
@@ -360,6 +387,13 @@ impl<P: WindowPlatform> Controller<P> {
                 return false;
             }
             _ if self.paused => {}
+            Message::ExpectStartup(list) => {
+                let now = Instant::now();
+                for e in list {
+                    self.startup.retain(|(exe, _, _)| *exe != e.exe);
+                    self.startup.push((e.exe, e.workspace.min(8), now + e.ttl));
+                }
+            }
             Message::Opened(id) => self.try_add(id),
             Message::Closed(id) => {
                 let fx = self.desk.remove_window(id);
@@ -1152,6 +1186,59 @@ mod tests {
         assert!(c.platform().windows[&1].hidden, "va a un workspace oculto");
         assert_eq!(c.desktop().entry(2).unwrap().kind, crate::domain::desktop::Kind::Floating);
         assert_eq!(c.platform().windows[&3].rect.w, 1000, "la tercera queda sola en el layout");
+    }
+
+    // ---------- Aplicaciones de arranque ----------
+
+    fn expect(exe: &str, workspace: usize, ttl: Duration) -> Message {
+        Message::ExpectStartup(vec![StartupExpect { exe: exe.into(), workspace, ttl }])
+    }
+
+    #[test]
+    fn una_app_de_arranque_va_a_su_workspace_y_las_demas_se_quedan_donde_estan() {
+        let mut c = Controller::new(FakePlatform::new(), Scope::TitlePrefix("WMTEST".into()));
+        c.handle(expect("spotify", 4, Duration::from_secs(60)));
+        with_exe(c.platform_mut(), 1, "Spotify.exe", "WMTEST musica");
+        with_exe(c.platform_mut(), 2, "otro.exe", "WMTEST otro");
+        c.handle(Message::Opened(1));
+        c.handle(Message::Opened(2));
+        assert_eq!(c.desktop().workspace_of(1), Some(4));
+        assert!(c.platform().windows[&1].hidden, "el workspace 5 no se ve");
+        assert_eq!(c.desktop().workspace_of(2), Some(0));
+    }
+
+    #[test]
+    fn todas_las_ventanas_de_la_app_mientras_dura_la_espera_y_ninguna_despues() {
+        let mut c = Controller::new(FakePlatform::new(), Scope::TitlePrefix("WMTEST".into()));
+        c.handle(expect("code", 2, Duration::from_secs(60)));
+        c.handle(expect("caducada", 6, Duration::ZERO));
+        for id in [1, 2] {
+            with_exe(c.platform_mut(), id, "code.exe", "WMTEST code");
+            c.handle(Message::Opened(id));
+        }
+        with_exe(c.platform_mut(), 3, "caducada.exe", "WMTEST tarde");
+        c.handle(Message::Opened(3));
+        assert_eq!((c.desktop().workspace_of(1), c.desktop().workspace_of(2)), (Some(2), Some(2)));
+        assert_eq!(c.desktop().workspace_of(3), Some(0), "la espera ya había caducado");
+    }
+
+    #[test]
+    fn una_regla_de_ventana_o_una_exclusion_mandan_sobre_la_de_arranque() {
+        use crate::domain::rules::WindowRule;
+        let rules = vec![WindowRule { exe: Some("code".into()), title_contains: None, workspace: Some(3), float: false }];
+        let mut excl = ExclusionList::default();
+        excl.add("spotify", None);
+        let mut c = Controller::with_all(FakePlatform::new(), Scope::TitlePrefix("WMTEST".into()), Settings::default(), Keymap::default(), excl, rules);
+        c.handle(Message::ExpectStartup(vec![
+            StartupExpect { exe: "code".into(), workspace: 7, ttl: Duration::from_secs(60) },
+            StartupExpect { exe: "spotify".into(), workspace: 5, ttl: Duration::from_secs(60) },
+        ]));
+        with_exe(c.platform_mut(), 1, "code.exe", "WMTEST code");
+        with_exe(c.platform_mut(), 2, "spotify.exe", "WMTEST musica");
+        c.handle(Message::Opened(1));
+        c.handle(Message::Opened(2));
+        assert_eq!(c.desktop().workspace_of(1), Some(2), "gana la regla de ventana (workspace 3)");
+        assert!(!c.platform().windows[&2].touched, "una app excluida no se mueve aunque sea de arranque");
     }
 
     // ---------- Fase 5: estado para la barra y el panel ----------

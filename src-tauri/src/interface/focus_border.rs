@@ -2,6 +2,7 @@
 //! alrededor de la ventana en primer plano. Su aspecto (blanco, palpitante, con un destello que recorre el
 //! contorno) lo dibuja la vista `?view=border`.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -14,6 +15,12 @@ use crate::infrastructure::windows::{appbar, facts};
 const LABEL: &str = "focus-border";
 /// Margen que el borde deja por fuera de la ventana, en píxeles físicos.
 const OUTSET: i32 = 4;
+/// ¿Se dibuja el borde? Lo apaga «Sin marco» en Personalización: sin borde la ventana ni se muestra ni se mueve.
+static ENABLED: AtomicBool = AtomicBool::new(true);
+
+pub fn set_enabled(on: bool) {
+    ENABLED.store(on, Ordering::SeqCst);
+}
 
 fn hwnd_of(w: &tauri::WebviewWindow) -> Option<isize> {
     w.hwnd().ok().map(|h| h.0 as isize)
@@ -22,7 +29,7 @@ fn hwnd_of(w: &tauri::WebviewWindow) -> Option<isize> {
 fn create(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     let url = WebviewUrl::App("index.html?view=border".into());
     let w = WebviewWindowBuilder::new(app, LABEL, url)
-        .title("Window Manager Border")
+        .title("Tesela Border")
         .decorations(false)
         .transparent(true)
         .resizable(false)
@@ -69,7 +76,7 @@ pub fn start(app: &AppHandle) {
         let mut last: Option<Rect> = None;
         loop {
             std::thread::sleep(Duration::from_millis(60));
-            let target = facts::highlight_target();
+            let target = if ENABLED.load(Ordering::SeqCst) { facts::highlight_target() } else { None };
             if window.is_none() && target.is_some() {
                 window = app.get_webview_window(LABEL).or_else(|| create(&app));
             }

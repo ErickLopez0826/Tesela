@@ -15,13 +15,25 @@ pub struct CliArgs {
     pub recover: bool,
     /// Muestra la barra de cada monitor (reserva espacio en pantalla).
     pub bar: bool,
-    /// Arranca sin mostrar la ventana principal: solo el icono de la bandeja (lo usa el arranque con Windows).
+    /// No abrir las aplicaciones de arranque (lo usa el reinicio desde Ajustes: ya están abiertas).
+    pub no_startup_apps: bool,
+    /// Se acepta por compatibilidad (el arranque con Windows lo pasa): la app ya no tiene ventana principal que ocultar.
     pub background: bool,
-    /// Prueba de extremo a extremo de un módulo instalado: la ventana principal lo carga, anota lo que
+    /// Prueba de extremo a extremo de un módulo instalado: una ventana de pruebas lo carga, anota lo que
     /// pide a la API del núcleo y escribe el informe en `WM_SELFTEST_OUT` (solo para pruebas).
     pub selftest_module: Option<String>,
     /// Espera antes de arrancar (lo usa el reinicio desde la interfaz para dar tiempo a que la instancia anterior suelte los atajos).
     pub delay_ms: u64,
+}
+
+/// Sin ningún argumento (el acceso directo del menú Inicio) la app hace lo que se espera de ella: gestionar las ventanas y
+/// mostrar la barra. Con cualquier argumento se respeta lo pedido tal cual.
+pub fn with_defaults(mut args: CliArgs) -> CliArgs {
+    if args == CliArgs::default() {
+        args.manage = Some(Scope::All);
+        args.bar = true;
+    }
+    args
 }
 
 pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<CliArgs, String> {
@@ -36,6 +48,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<CliArgs, St
             "--recover" => out.recover = true,
             "--bar" => out.bar = true,
             "--background" => out.background = true,
+            "--no-startup-apps" => out.no_startup_apps = true,
             "--delay-ms" => {
                 out.delay_ms = it.next().and_then(|v| v.parse().ok()).ok_or("--delay-ms necesita un número")?;
             }
@@ -54,6 +67,7 @@ pub fn run() {
             std::process::exit(2);
         }
     };
+    let args = with_defaults(args);
 
     if args.delay_ms > 0 {
         std::thread::sleep(std::time::Duration::from_millis(args.delay_ms.min(10_000)));
@@ -164,6 +178,14 @@ pub fn run() {
             interface::commands::run_action,
             interface::commands::open_panel,
             interface::commands::close_panel,
+            interface::commands::glass_image,
+            interface::commands::tasks_list,
+            interface::commands::tasks_save,
+            interface::commands::startup_list,
+            interface::commands::startup_save,
+            interface::commands::app_suggestions,
+            interface::commands::quit_app,
+            interface::commands::border_enable,
             interface::commands::panel_resize,
             interface::commands::system_mode,
             interface::commands::overview,
@@ -231,7 +253,13 @@ pub fn run() {
                 }
             }
             if args.selftest_module.is_none() {
-                interface::tray::setup(app, args.background);
+                interface::tray::setup(app);
+            } else {
+                // Única situación con ventana normal: la prueba de extremo a extremo de un módulo.
+                let url = tauri::WebviewUrl::App("index.html".into());
+                if let Err(e) = tauri::WebviewWindowBuilder::new(app, "main", url).title("Tesela").inner_size(900.0, 600.0).build() {
+                    eprintln!("[wm] no se pudo crear la ventana de pruebas: {e}");
+                }
             }
             let _ = (&app, &args);
             Ok(())
@@ -240,6 +268,11 @@ pub fn run() {
         .expect("error al construir la aplicación");
 
     app.run(|_app, event| {
+        // Sin ventana principal, que se cierre la última ventana (p. ej. al quitar un monitor) no debe terminar la app:
+        // se sale solo desde «Salir» de la bandeja.
+        if let tauri::RunEvent::ExitRequested { code: None, api, .. } = &event {
+            api.prevent_exit();
+        }
         if let tauri::RunEvent::Exit = event {
             #[cfg(windows)]
             {
@@ -305,7 +338,12 @@ fn setup_windows(
         interface::focus_border::start(&handle);
     }
 
-    let Some(scope) = args.manage.clone() else { return };
+    // Las aplicaciones de arranque se abren con Tesela (salvo tras un reinicio desde Ajustes, que ya las dejó abiertas).
+    let startup_apps = if args.no_startup_apps { Vec::new() } else { infrastructure::startup_store::load(&infrastructure::startup_store::default_path()) };
+    let Some(scope) = args.manage.clone() else {
+        infrastructure::windows::startup_launch::launch_all(startup_apps, None);
+        return;
+    };
     let callbacks = Callbacks {
         notice: {
             let h = handle.clone();
@@ -358,6 +396,7 @@ fn setup_windows(
         *focus_sink.lock().unwrap() =
             Some(Box::new(move |handle| tx.send(application::controller::Message::FocusWindow(handle)).is_ok()));
     }
+    infrastructure::windows::startup_launch::launch_all(startup_apps, Some(runtime.sender()));
     let state = app.state::<interface::commands::AppState>();
     *state.manager.lock().unwrap() = Some(runtime);
 }
@@ -391,6 +430,22 @@ mod tests {
     fn background_se_reconoce() {
         assert!(parse_args(a(&["--background"])).unwrap().background);
         assert!(!parse_args(a(&[])).unwrap().background);
+    }
+
+    #[test]
+    fn sin_argumentos_gestiona_todo_y_muestra_la_barra_y_con_argumentos_se_respeta_lo_pedido() {
+        let d = with_defaults(parse_args(a(&[])).unwrap());
+        assert_eq!(d.manage, Some(Scope::All));
+        assert!(d.bar);
+        // Solo la barra: no se añade la gestión.
+        let only_bar = with_defaults(parse_args(a(&["--bar"])).unwrap());
+        assert_eq!(only_bar.manage, None);
+        // Recuperar ventanas no arranca nada más.
+        let recover = with_defaults(parse_args(a(&["--recover"])).unwrap());
+        assert!(recover.recover && !recover.bar && recover.manage.is_none());
+        // Un reinicio sin gestión ni barra (con espera) tampoco se convierte en otra cosa.
+        let restart = with_defaults(parse_args(a(&["--delay-ms", "500"])).unwrap());
+        assert!(!restart.bar && restart.manage.is_none());
     }
 
     #[test]

@@ -1,5 +1,6 @@
 pub mod appbar;
 pub mod autostart;
+pub mod backdrop;
 pub mod enumerator;
 pub mod facts;
 pub mod fade;
@@ -7,4 +8,5 @@ pub mod known_folders;
 pub mod platform;
 pub mod runtime;
 pub mod slide;
+pub mod startup_launch;
 pub mod system;

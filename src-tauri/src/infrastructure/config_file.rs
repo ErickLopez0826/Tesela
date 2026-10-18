@@ -6,13 +6,23 @@ use crate::domain::config::{Config, ValidConfig};
 
 pub const DEFAULT_CONFIG: &str = include_str!("../../default-config.toml");
 
-/// Carpeta de configuración (`WM_CONFIG_DIR` en pruebas; `%APPDATA%\window-manager` normalmente).
+/// Carpeta de configuración (`WM_CONFIG_DIR` en pruebas; `%APPDATA%\Tesela` normalmente).
 pub fn config_dir() -> PathBuf {
     if let Ok(d) = std::env::var("WM_CONFIG_DIR") {
         return d.into();
     }
     let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".into());
-    PathBuf::from(base).join("window-manager")
+    let base = PathBuf::from(base);
+    migrate_legacy_dir(base.join("window-manager"), base.join("Tesela"))
+}
+
+/// La app se llamaba «window-manager»: si queda la carpeta antigua y aún no existe la nueva, se mueve entera para no
+/// perder módulos, notas ni ajustes. Si no se puede mover (algo la tiene abierta), se sigue usando la antigua.
+pub fn migrate_legacy_dir(old: PathBuf, new: PathBuf) -> PathBuf {
+    if !new.exists() && old.exists() && std::fs::rename(&old, &new).is_err() {
+        return old;
+    }
+    new
 }
 
 pub fn config_path() -> PathBuf {
@@ -56,6 +66,30 @@ mod tests {
     use crate::domain::actions::Action;
     use crate::domain::layout::{Axis, Dir, Orientation};
     use crate::domain::shortcuts::Chord;
+
+    #[test]
+    fn la_carpeta_antigua_se_mueve_a_la_nueva_con_su_contenido_y_solo_una_vez() {
+        let base = std::env::temp_dir().join(format!("tesela-migracion-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (old, new) = (base.join("window-manager"), base.join("Tesela"));
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("config.toml"), "dato").unwrap();
+
+        assert_eq!(migrate_legacy_dir(old.clone(), new.clone()), new);
+        assert_eq!(std::fs::read_to_string(new.join("config.toml")).unwrap(), "dato");
+        assert!(!old.exists());
+
+        // Si la nueva ya existe no se toca (ni se mezcla con otra antigua que reaparezca).
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("config.toml"), "otro").unwrap();
+        assert_eq!(migrate_legacy_dir(old.clone(), new.clone()), new);
+        assert_eq!(std::fs::read_to_string(new.join("config.toml")).unwrap(), "dato");
+
+        // Sin carpeta antigua tampoco hace nada.
+        let _ = std::fs::remove_dir_all(&base);
+        assert_eq!(migrate_legacy_dir(old, new.clone()), new);
+        assert!(!new.exists());
+    }
 
     fn default() -> ValidConfig {
         parse_config(DEFAULT_CONFIG).unwrap()

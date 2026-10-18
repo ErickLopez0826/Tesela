@@ -20,6 +20,7 @@ export const generalApi = {
   status: () => invoke<GeneralStatus>("general_status"),
   setAutostart: (enabled: boolean) => invoke<GeneralStatus>("autostart_set", { enabled }),
   restart: (manage: boolean, bar: boolean) => invoke<void>("restart_app", { manage, bar }),
+  quit: () => invoke<void>("quit_app"),
   checkUpdates: () => invoke<UpdateInfo | null>("updates_check"),
   installUpdate: () => invoke<void>("updates_install"),
 };

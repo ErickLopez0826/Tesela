@@ -436,3 +436,41 @@ fn dpi_aware() {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
 }
+
+#[test]
+#[ignore = "lee la pantalla y el fondo real un instante (solo lectura; no guarda nada)"]
+fn el_cristal_copia_el_fondo_de_la_barra_y_lo_de_detras_del_panel() {
+    use tesela_lib::domain::geometry::Rect;
+    use tesela_lib::infrastructure::windows::backdrop;
+    use tesela_lib::infrastructure::windows::facts::list_monitors;
+    dpi_aware();
+    let m = list_monitors().into_iter().find(|m| m.primary).expect("hay un monitor principal");
+    let scale = m.dpi_scale;
+
+    // Barra: el fondo de pantalla recortado a su zona.
+    let bar = Rect::new(m.bounds.x, m.bounds.y, m.bounds.w, (40.0 * scale).round() as i32);
+    let t = Instant::now();
+    let img = backdrop::bar_image("prueba-barra", bar, 40.0, scale, true);
+    eprintln!("barra: copia + desenfoque en {:?}", t.elapsed());
+    let img = img.expect("la barra debe poder copiar el fondo (¿Wallpaper Engine abierto?)");
+    assert_eq!((img.width, img.height), (bar.w, bar.h));
+    assert!(img.url.starts_with("data:image/bmp;base64,"));
+    eprintln!("barra: {} bytes de imagen", img.url.len());
+    // Una vez copiada, cambiar la intensidad no vuelve a copiar la pantalla.
+    let t = Instant::now();
+    backdrop::bar_image("prueba-barra", bar, 90.0, scale, false).expect("desde la copia guardada");
+    eprintln!("barra: solo desenfoque en {:?}", t.elapsed());
+
+    // Panel: la zona de la pantalla donde se abre.
+    let (w, h) = ((940.0 * scale) as i32, (900.0 * scale) as i32);
+    let region = Rect::new(m.work_area.x + (m.work_area.w - w) / 2, m.work_area.y + (12.0 * scale) as i32, w, h.min(m.work_area.h - 12));
+    let t = Instant::now();
+    backdrop::remember_panel(region);
+    eprintln!("panel: copia en {:?}", t.elapsed());
+    let t = Instant::now();
+    let img = backdrop::panel_image(60.0, scale).expect("el panel debe poder copiar lo que hay detrás");
+    eprintln!("panel: desenfoque en {:?} ({} bytes)", t.elapsed(), img.url.len());
+    assert_eq!((img.width, img.height), (region.w, region.h));
+    backdrop::forget_panel();
+    assert!(backdrop::panel_image(60.0, scale).is_none());
+}

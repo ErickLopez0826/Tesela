@@ -7,7 +7,7 @@ import NotesSection from "./NotesSection.svelte";
 afterEach(cleanup);
 
 const stamp = new Date(2026, 9, 16, 9, 5).getTime();
-const note = (id: string, text: string): Note => ({ id, text, created: stamp, updated: stamp });
+const note = (id: string, text: string, created = stamp): Note => ({ id, text, created, updated: created });
 
 function notesApi(initial: Note[] = [], over: Partial<NotesApi> = {}): NotesApi {
   let n = initial.length;
@@ -22,6 +22,14 @@ function notesApi(initial: Note[] = [], over: Partial<NotesApi> = {}): NotesApi 
     clipboardWrite: vi.fn().mockResolvedValue(undefined),
     ...over,
   };
+}
+
+/** Escribe una fecha «AAAA-MM-DD» en las tres casillas de un campo de fecha, como lo haría una persona. */
+async function typeDate(label: string, iso: string) {
+  const [y, m, d] = iso.split("-");
+  await fireEvent.input(screen.getByLabelText(`${label}: día`), { target: { value: d } });
+  await fireEvent.input(screen.getByLabelText(`${label}: mes`), { target: { value: m } });
+  await fireEvent.input(screen.getByLabelText(`${label}: año`), { target: { value: y } });
 }
 
 describe("NotesSection", () => {
@@ -143,14 +151,183 @@ describe("NotesSection", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Exportar .md" }));
     await waitFor(() => expect(api.exportFile).toHaveBeenCalled());
     const [name, content] = (api.exportFile as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(name).toMatch(/^notas-\d{4}-\d{2}-\d{2}\.md$/);
+    // Una sola nota (la única encontrada) se guarda como «nota-…» con su fecha y hora.
+    expect(name).toBe("nota-2026-10-16-0905.md");
     expect(content).toContain("# Notas");
     expect(content).toContain("Llamar a Ana");
     expect(content).not.toContain("café");
     await fireEvent.click(screen.getByRole("button", { name: "Exportar .txt" }));
     await waitFor(() => expect(api.exportFile).toHaveBeenCalledTimes(2));
     expect((api.exportFile as ReturnType<typeof vi.fn>).mock.calls[1][1]).not.toContain("#");
-    await waitFor(() => expect(screen.getByText(/Guardado en C:/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Nota guardada en C:/)).toBeTruthy());
+  });
+
+  describe("exportar una, varias o todas", () => {
+    const day = (d: number, h = 10) => new Date(2026, 9, d, h, 0).getTime();
+    const many = () => [note("1", "Comprar café", day(14)), note("2", "Llamar a Ana", day(15)), note("3", "Pagar la luz", day(16))];
+    const exported = (api: NotesApi, call = 0) => (api.exportFile as ReturnType<typeof vi.fn>).mock.calls[call] as [string, string];
+
+    it("sin marcar ninguna se exportan todas", async () => {
+      const api = notesApi(many());
+      render(NotesSection, { api });
+      await waitFor(() => expect(screen.getByText("Pagar la luz")).toBeTruthy());
+      expect(screen.getByText("Se exportan todas")).toBeTruthy();
+      await fireEvent.click(screen.getByRole("button", { name: "Exportar .md" }));
+      await waitFor(() => expect(api.exportFile).toHaveBeenCalled());
+      const [name, content] = exported(api);
+      expect(name).toMatch(/^notas-\d{4}-\d{2}-\d{2}\.md$/);
+      for (const t of ["Comprar café", "Llamar a Ana", "Pagar la luz"]) expect(content).toContain(t);
+      await waitFor(() => expect(screen.getByText(/3 notas guardadas en/)).toBeTruthy());
+    });
+
+    it("marcando una sola se exporta solo esa, con su propio nombre de archivo", async () => {
+      const api = notesApi(many());
+      render(NotesSection, { api });
+      await waitFor(() => expect(screen.getByText("Pagar la luz")).toBeTruthy());
+      await fireEvent.click(screen.getByLabelText("Seleccionar nota del 15/10/2026 10:00"));
+      expect(screen.getByText("Se exporta la nota seleccionada")).toBeTruthy();
+      await fireEvent.click(screen.getByRole("button", { name: "Exportar .txt" }));
+      await waitFor(() => expect(api.exportFile).toHaveBeenCalled());
+      const [name, content] = exported(api);
+      expect(name).toBe("nota-2026-10-15-1000.txt");
+      expect(content).toContain("Llamar a Ana");
+      expect(content).not.toContain("café");
+      expect(content).not.toContain("la luz");
+    });
+
+    it("marcando varias se exportan solo esas, en el orden de la lista", async () => {
+      const api = notesApi(many());
+      render(NotesSection, { api });
+      await waitFor(() => expect(screen.getByText("Pagar la luz")).toBeTruthy());
+      await fireEvent.click(screen.getByLabelText("Seleccionar nota del 16/10/2026 10:00"));
+      await fireEvent.click(screen.getByLabelText("Seleccionar nota del 14/10/2026 10:00"));
+      expect(screen.getByText("Se exportan las 2 seleccionadas")).toBeTruthy();
+      await fireEvent.click(screen.getByRole("button", { name: "Exportar .md" }));
+      await waitFor(() => expect(api.exportFile).toHaveBeenCalled());
+      const [name, content] = exported(api);
+      expect(name).toMatch(/^notas-/);
+      expect(content.indexOf("Comprar café")).toBeLessThan(content.indexOf("Pagar la luz"));
+      expect(content).not.toContain("Llamar a Ana");
+    });
+
+    it("«Todas» marca las que se ven y quitar la selección vuelve a exportar todas", async () => {
+      const api = notesApi(many());
+      render(NotesSection, { api });
+      await waitFor(() => expect(screen.getByText("Pagar la luz")).toBeTruthy());
+      await fireEvent.click(screen.getByLabelText("Seleccionar las notas que se ven"));
+      expect(screen.getByText("Se exportan las 3 seleccionadas")).toBeTruthy();
+      await fireEvent.click(screen.getByRole("button", { name: /Quitar selección \(3\)/ }));
+      expect(screen.getByText("Se exportan todas")).toBeTruthy();
+    });
+
+    it("«Todas las encontradas» solo marca las que cumplen la búsqueda", async () => {
+      const api = notesApi(many());
+      render(NotesSection, { api });
+      await waitFor(() => expect(screen.getByText("Pagar la luz")).toBeTruthy());
+      await fireEvent.input(screen.getByLabelText("Buscar notas"), { target: { value: "ana" } });
+      await fireEvent.click(screen.getByLabelText("Seleccionar las notas que se ven"));
+      expect(screen.getByText("Se exporta la nota seleccionada")).toBeTruthy();
+      await fireEvent.input(screen.getByLabelText("Buscar notas"), { target: { value: "" } });
+      expect(screen.getByText("Se exporta la nota seleccionada")).toBeTruthy(); // la marca sobrevive al cambiar la búsqueda
+    });
+
+    it("copiar usa la selección y borrar una nota la quita de la selección", async () => {
+      const api = notesApi(many());
+      render(NotesSection, { api });
+      await waitFor(() => expect(screen.getByText("Pagar la luz")).toBeTruthy());
+      await fireEvent.click(screen.getByLabelText("Seleccionar nota del 14/10/2026 10:00"));
+      await fireEvent.click(screen.getByRole("button", { name: "Copiar selección" }));
+      await waitFor(() => expect(api.clipboardWrite).toHaveBeenCalled());
+      expect((api.clipboardWrite as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain("Comprar café");
+      expect((api.clipboardWrite as ReturnType<typeof vi.fn>).mock.calls[0][0]).not.toContain("Ana");
+      const card = screen.getByText("Comprar café").closest("li")!;
+      await fireEvent.click(card.querySelector(".danger")!);
+      await fireEvent.click(card.querySelector(".danger")!);
+      await waitFor(() => expect(screen.getByText("Se exportan todas")).toBeTruthy());
+    });
+  });
+
+  describe("buscar por fecha", () => {
+    const day = (m: number, d: number) => new Date(2026, m, d, 12, 0).getTime();
+    const dated = () => [note("1", "de septiembre", day(8, 30)), note("2", "de octubre", day(9, 10)), note("3", "más reciente", day(9, 20))];
+
+    it("con «desde» y «hasta» solo salen las notas de ese rango (los dos días incluidos)", async () => {
+      render(NotesSection, { api: notesApi(dated()) });
+      await waitFor(() => expect(screen.getByText("más reciente")).toBeTruthy());
+      await fireEvent.click(screen.getByRole("button", { name: "Filtrar por fecha" }));
+      await typeDate("Desde la fecha", "2026-10-10");
+      expect(screen.queryByText("de septiembre")).toBeNull();
+      expect(screen.getByText("de octubre")).toBeTruthy();
+      await typeDate("Hasta la fecha", "2026-10-10");
+      expect(screen.queryByText("más reciente")).toBeNull();
+      expect(screen.getByText("de octubre")).toBeTruthy();
+      expect(screen.getByText(/Se exportan las 1 encontradas/)).toBeTruthy();
+    });
+
+    it("«Quitar fechas» las muestra todas otra vez", async () => {
+      render(NotesSection, { api: notesApi(dated()) });
+      await waitFor(() => expect(screen.getByText("más reciente")).toBeTruthy());
+      await fireEvent.click(screen.getByRole("button", { name: "Filtrar por fecha" }));
+      await typeDate("Desde la fecha", "2026-10-15");
+      expect(screen.queryByText("de octubre")).toBeNull();
+      await fireEvent.click(screen.getByRole("button", { name: "Quitar fechas" }));
+      expect(screen.getByText("de septiembre")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Quitar fechas" })).toBeNull();
+    });
+
+    it("los atajos ponen el rango y se marcan; tocar el activo lo quita", async () => {
+      const now = Date.now();
+      const recent = [note("1", "de hoy", now), note("2", "viejita", new Date(2020, 0, 5, 12).getTime())];
+      render(NotesSection, { api: notesApi(recent) });
+      await waitFor(() => expect(screen.getByText("de hoy")).toBeTruthy());
+      await fireEvent.click(screen.getByRole("button", { name: "Filtrar por fecha" }));
+      await fireEvent.click(screen.getByRole("button", { name: "Hoy" }));
+      expect(screen.getByRole("button", { name: "Hoy" }).getAttribute("aria-pressed")).toBe("true");
+      expect(screen.queryByText("viejita")).toBeNull();
+      expect(screen.getByText(/1 nota$/)).toBeTruthy();
+      await fireEvent.click(screen.getByRole("button", { name: "Hoy" }));
+      expect(screen.getByText("viejita")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Hoy" }).getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("con un rango puesto el panel de fechas no se puede perder de vista y el botón lo marca", async () => {
+      render(NotesSection, { api: notesApi(dated()) });
+      await waitFor(() => expect(screen.getByText("más reciente")).toBeTruthy());
+      const toggle = screen.getByRole("button", { name: "Filtrar por fecha" });
+      expect(screen.queryByLabelText("Desde la fecha")).toBeNull();
+      await fireEvent.click(toggle);
+      await typeDate("Desde la fecha", "2026-10-10");
+      await fireEvent.click(toggle);
+      expect(screen.getByLabelText("Desde la fecha")).toBeTruthy();
+      expect(toggle.classList.contains("active")).toBe(true);
+      expect(screen.getByText(/Desde el 10\/10\/2026 · 2 notas/)).toBeTruthy();
+    });
+
+    it("también se encuentra escribiendo la fecha en el buscador", async () => {
+      render(NotesSection, { api: notesApi(dated()) });
+      await waitFor(() => expect(screen.getByText("más reciente")).toBeTruthy());
+      await fireEvent.input(screen.getByLabelText("Buscar notas"), { target: { value: "20/10/2026" } });
+      expect(screen.getByText("más reciente")).toBeTruthy();
+      expect(screen.queryByText("de octubre")).toBeNull();
+    });
+
+    it("la fecha y el texto se combinan", async () => {
+      render(NotesSection, { api: notesApi(dated()) });
+      await waitFor(() => expect(screen.getByText("más reciente")).toBeTruthy());
+      await fireEvent.click(screen.getByRole("button", { name: "Filtrar por fecha" }));
+      await typeDate("Desde la fecha", "2026-10-01");
+      await fireEvent.input(screen.getByLabelText("Buscar notas"), { target: { value: "reciente" } });
+      expect(screen.getByText("más reciente")).toBeTruthy();
+      expect(screen.queryByText("de octubre")).toBeNull();
+    });
+
+    it("sin coincidencias lo dice", async () => {
+      render(NotesSection, { api: notesApi(dated()) });
+      await waitFor(() => expect(screen.getByText("más reciente")).toBeTruthy());
+      await fireEvent.click(screen.getByRole("button", { name: "Filtrar por fecha" }));
+      await typeDate("Desde la fecha", "2027-01-01");
+      expect(screen.getByText("Ninguna nota coincide con la búsqueda.")).toBeTruthy();
+    });
   });
 
   it("un error se muestra sin romper nada", async () => {

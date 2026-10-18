@@ -102,8 +102,30 @@ describe("BarView: volumen, gráfica y temperatura de Mérida", () => {
     });
     expect(screen.queryByText("Banda – Tema")).toBeNull();
     expect(screen.getByText(/^GPU 37/)).toBeTruthy();
-    expect(screen.getByText("Mérida 61 °C")).toBeTruthy();
+    // Sin el nombre del sitio: solo la temperatura (el tiempo va como icono cuando se conoce).
+    expect(screen.getByText("61 °C")).toBeTruthy();
+    expect(screen.queryByText(/Mérida/)).toBeNull();
     await fireEvent.click(screen.getByLabelText("Silenciar"));
     expect(onMute).toHaveBeenCalledWith(true);
+  });
+
+  it("muestra el estado del tiempo como icono (sol, nube, lluvia…) junto a la temperatura", () => {
+    const base = { monitorId: 1, state, stats, now, onWorkspace: vi.fn(), temperature: 28.2 };
+    const { container, rerender } = render(BarView, { ...base, weatherCode: 0 });
+    const weather = () => container.querySelector(".weather") as HTMLElement;
+    expect(weather().getAttribute("aria-label")).toBe("Despejado, 28 °C");
+    expect(weather().querySelector("svg")?.getAttribute("data-kind")).toBe("sun");
+    return rerender({ weatherCode: 3 }).then(async () => {
+      expect(weather().querySelector("svg")?.getAttribute("data-kind")).toBe("cloud");
+      expect(weather().getAttribute("title")).toBe("Nublado");
+      await rerender({ weatherCode: 63 });
+      expect(weather().querySelector("svg")?.getAttribute("data-kind")).toBe("rain");
+    });
+  });
+
+  it("sin el código del tiempo muestra solo la temperatura, sin icono", () => {
+    const { container } = render(BarView, { monitorId: 1, state, stats, now, onWorkspace: vi.fn(), temperature: 20 });
+    expect(container.querySelector(".weather svg")).toBeNull();
+    expect(screen.getByText("20 °C")).toBeTruthy();
   });
 });

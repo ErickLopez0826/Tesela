@@ -2,15 +2,15 @@
   import { merida } from "../stores/weather";
   import { refreshWallpaperTheme } from "../stores/theme";
   import { onDestroy, onMount } from "svelte";
-  import { closePanel, onPanelClosing, onPanelShown, panelResize, runAction } from "../api/state";
+  import { closePanel, onPanelClosing, onPanelShown, panelResize } from "../api/state";
   import { audioApi, notesApi, systemApi } from "../api/system";
+  import { tasksApi } from "../api/tasks";
   import type { ActionOutcome, SystemMode } from "../api/system";
   import PanelView from "../components/PanelView.svelte";
+  import { installBorderSync } from "../stores/borderSync";
   import { createPollingStore, isHidden, onShown } from "../stores/polling";
   import { createModulesStore } from "../stores/modules";
-  import { createStateStore } from "../stores/wmState";
 
-  const stateStore = createStateStore();
   const modules = createModulesStore();
   const overview = createPollingStore(systemApi.overview, 2000);
   const media = createPollingStore(systemApi.mediaNow, 2000);
@@ -32,19 +32,19 @@
   let stopShown: (() => void) | undefined;
 
   onMount(() => {
+    const stopBorderSync = installBorderSync();
     onPanelShown(() => openTick++).then((u) => (unlistenShown = u)).catch(() => {});
     onPanelClosing(() => closeTick++).then((u) => (unlistenClosing = u)).catch(() => {});
-    void stateStore.start();
     void modules.start();
     for (const s of [overview, media, volume, radios, wallpapers, engine]) s.start();
     // El reloj del panel solo corre mientras se ve.
     clock = setInterval(() => !isHidden() && (now = new Date()), 1000);
     stopShown = onShown(() => (now = new Date()));
     systemApi.mode().then((m) => (mode = m)).catch(() => {});
+    return stopBorderSync;
   });
 
   onDestroy(() => {
-    stateStore.stop();
     modules.stop();
     for (const s of [overview, media, volume, radios, wallpapers, engine]) s.stop();
     clearInterval(clock);
@@ -87,7 +87,6 @@
 </script>
 
 <PanelView
-  state={$stateStore}
   {now}
   overview={$overview}
   media={$media}
@@ -101,7 +100,6 @@
   {mediaArt}
   weather={$merida}
   onResize={(h) => void panelResize(h).catch(() => {})}
-  onWorkspace={(n) => void runAction(`workspace_${n}`).catch(() => {})}
   onClose={() => void closePanel()}
   onMediaCommand={(c) => void after(systemApi.mediaCommand(c), media.refresh).catch(() => {})}
   onVolume={(p) => void after(systemApi.volumeSet(p), volume.refresh).catch(() => {})}
@@ -110,6 +108,7 @@
   onPower={(a): Promise<ActionOutcome> => systemApi.powerRun(a)}
   network={systemApi}
   notes={notesApi}
+  tasks={tasksApi}
   engine={$engine}
   onEngineApply={(id, m) => after(systemApi.engineApply(id, m), refreshEngine)}
   audio={audioApi}

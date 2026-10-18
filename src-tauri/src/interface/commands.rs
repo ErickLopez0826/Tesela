@@ -212,6 +212,33 @@ pub fn close_panel(app: tauri::AppHandle) {
     crate::interface::bar::hide_panel(&app);
 }
 
+/// Imagen de lo que hay detrás de la barra o del panel, ya desenfocada con la intensidad (0 a 100) pedida: la vista la
+/// dibuja bajo su tinte. `None` si no se pudo copiar (entonces se queda solo el tinte). Con `refresh` se vuelve a copiar
+/// el fondo de pantalla de la barra (cambió el fondo).
+#[cfg(windows)]
+#[tauri::command]
+pub async fn glass_image(
+    window: tauri::WebviewWindow,
+    kind: String,
+    blur: f32,
+    refresh: bool,
+) -> Result<Option<crate::infrastructure::windows::backdrop::GlassImage>, String> {
+    use crate::domain::geometry::Rect;
+    use crate::infrastructure::windows::backdrop;
+    let scale = window.scale_factor().unwrap_or(1.0);
+    match kind.as_str() {
+        "bar" => {
+            let pos = window.outer_position().map_err(|e| e.to_string())?;
+            let size = window.outer_size().map_err(|e| e.to_string())?;
+            let rect = Rect::new(pos.x, pos.y, size.width as i32, size.height as i32);
+            let label = window.label().to_string();
+            blocking(move || Ok(backdrop::bar_image(&label, rect, blur, scale, refresh))).await
+        }
+        "panel" => blocking(move || Ok(backdrop::panel_image(blur, scale))).await,
+        other => Err(format!("fondo desconocido: {other}")),
+    }
+}
+
 // ----- Módulos de sistema y de acción (Fase 6) -----
 
 /// Ejecuta algo que puede bloquearse (COM/WinRT, procesos, disco) en el grupo de hilos «bloqueantes» de Tauri.
@@ -698,13 +725,58 @@ pub fn autostart_set(app: tauri::AppHandle, state: State<'_, AppState>, enabled:
     Ok(general(&app, &state))
 }
 
+/// Tareas del día, en el orden en que se hacen.
+#[tauri::command]
+pub fn tasks_list() -> Vec<crate::domain::tasks::Task> {
+    crate::infrastructure::tasks_store::load(&crate::infrastructure::tasks_store::default_path())
+}
+
+/// Guarda la lista completa de tareas (la valida) y la devuelve ya limpia.
+#[tauri::command]
+pub fn tasks_save(tasks: Vec<crate::domain::tasks::Task>) -> Result<Vec<crate::domain::tasks::Task>, String> {
+    crate::infrastructure::tasks_store::save(&crate::infrastructure::tasks_store::default_path(), tasks)
+}
+
+/// Aplicaciones que se abren junto con Tesela, cada una con su workspace.
+#[tauri::command]
+pub fn startup_list() -> Vec<crate::domain::startup::StartupApp> {
+    crate::infrastructure::startup_store::load(&crate::infrastructure::startup_store::default_path())
+}
+
+/// Guarda la lista de aplicaciones de arranque (la valida) y la devuelve ya limpia.
+#[tauri::command]
+pub fn startup_save(apps: Vec<crate::domain::startup::StartupApp>) -> Result<Vec<crate::domain::startup::StartupApp>, String> {
+    crate::infrastructure::startup_store::save(&crate::infrastructure::startup_store::default_path(), apps)
+}
+
+/// Las aplicaciones que tiene el usuario (instaladas y abiertas) para elegir una al excluir o al abrir al arrancar.
+#[cfg(windows)]
+#[tauri::command]
+pub async fn app_suggestions() -> Result<Vec<crate::domain::startup::AppSuggestion>, String> {
+    blocking(|| Ok(crate::infrastructure::windows::system::installed_apps::suggestions())).await
+}
+
+/// Cierra la app por completo: al salir se devuelven las ventanas a su sitio y se retira la barra.
+#[tauri::command]
+pub fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+/// Enciende o apaga el borde de la ventana en uso («Sin marco» en Personalización).
+#[cfg(windows)]
+#[tauri::command]
+pub fn border_enable(on: bool) {
+    crate::interface::focus_border::set_enabled(on);
+}
+
 /// Reinicia la app con o sin gestor de ventanas y barra. La instancia nueva espera un momento para que esta
 /// suelte los atajos y devuelva las ventanas a su sitio.
 #[tauri::command]
 pub fn restart_app(app: tauri::AppHandle, manage: bool, bar: bool) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut cmd = std::process::Command::new(exe);
-    cmd.args(["--delay-ms", "2500"]);
+    // Ya están abiertas las aplicaciones de arranque: la instancia nueva no las vuelve a abrir.
+    cmd.args(["--delay-ms", "2500", "--no-startup-apps"]);
     if manage {
         cmd.args(["--manage", "all"]);
     }

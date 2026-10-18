@@ -27,7 +27,40 @@ describe("AppearancePanel", () => {
     await fireEvent.click(screen.getByRole("radio", { name: "Adaptar al fondo" }));
     expect(get(theme).mode).toBe("wallpaper");
     expect((container.querySelector('input[aria-label="Acento"]') as HTMLInputElement).disabled).toBe(true);
-    await fireEvent.click(screen.getByRole("button", { name: "Restablecer blanco y negro" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Restablecer valores" }));
     expect(get(theme)).toEqual(DEFAULT_THEME);
+  });
+
+  it("los deslizadores de cristal cambian la transparencia y el desenfoque de la barra y del panel", async () => {
+    render(AppearancePanel);
+    const slider = (name: string) => screen.getByLabelText(name) as HTMLInputElement;
+    await fireEvent.input(slider("Barra superior: Transparencia"), { target: { value: "70" } });
+    await fireEvent.input(slider("Barra superior: Desenfoque"), { target: { value: "15" } });
+    await fireEvent.input(slider("Panel de información: Transparencia"), { target: { value: "35" } });
+    await fireEvent.input(slider("Panel de información: Desenfoque"), { target: { value: "80" } });
+    const t = get(theme);
+    expect([t.barTransparency, t.barBlur, t.panelTransparency, t.panelBlur]).toEqual([70, 15, 35, 80]);
+    // La transparencia tiene tope para que el texto siga leyéndose.
+    expect(slider("Barra superior: Transparencia").max).toBe("90");
+    expect(screen.getByText("70%")).toBeTruthy();
+  });
+
+  it("el marco de la ventana en uso puede ser animado, fijo o quitarse", async () => {
+    render(AppearancePanel);
+    expect(get(theme).borderStyle).toBe("animated");
+    await fireEvent.click(screen.getByRole("radio", { name: "Fijo" }));
+    expect(get(theme).borderStyle).toBe("steady");
+    expect(screen.getByText(/sin ningún efecto animado/)).toBeTruthy();
+    await fireEvent.click(screen.getByRole("radio", { name: "Sin marco" }));
+    expect(get(theme).borderStyle).toBe("off");
+    await fireEvent.click(screen.getByRole("button", { name: "Restablecer valores" }));
+    expect(get(theme).borderStyle).toBe("animated");
+  });
+
+  it("restablecer devuelve también el cristal a sus valores", async () => {
+    render(AppearancePanel);
+    await fireEvent.input(screen.getByLabelText("Panel de información: Desenfoque"), { target: { value: "90" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Restablecer valores" }));
+    expect(get(theme).panelBlur).toBe(DEFAULT_THEME.panelBlur);
   });
 });

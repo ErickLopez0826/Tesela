@@ -75,13 +75,15 @@ pub struct Win32Platform {
     pub last_hide_method: Option<HideMethod>,
 }
 
-/// Carpeta de estado de la app (`WM_STATE_DIR` en pruebas; `%LOCALAPPDATA%\window-manager` normalmente).
+/// Carpeta de estado de la app (`WM_STATE_DIR` en pruebas; `%LOCALAPPDATA%\Tesela\state` normalmente).
+/// Va en una subcarpeta porque `%LOCALAPPDATA%\Tesela` es la carpeta donde se instala el programa.
 pub fn state_dir() -> std::path::PathBuf {
     if let Ok(d) = std::env::var("WM_STATE_DIR") {
         return d.into();
     }
     let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into());
-    std::path::Path::new(&base).join("window-manager")
+    let base = std::path::PathBuf::from(base);
+    crate::infrastructure::config_file::migrate_legacy_dir(base.join("window-manager"), base.join("Tesela").join("state"))
 }
 
 /// Ventanas que la app tiene ocultas por estar en otro workspace (siguen siendo "apps abiertas").

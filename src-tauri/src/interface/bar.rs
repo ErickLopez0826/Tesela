@@ -5,11 +5,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use tauri::utils::config::WindowEffectsConfig;
-use tauri::window::Effect;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 use crate::domain::desktop::Monitor;
+use crate::domain::geometry::Rect;
 use crate::infrastructure::windows::appbar;
 use crate::infrastructure::windows::facts::list_monitors;
 
@@ -34,6 +33,8 @@ static PANEL_CLOSING: AtomicBool = AtomicBool::new(false);
 static PANEL_GEN: AtomicU64 = AtomicU64::new(0);
 /// Lo que tarda la animación de cierre de la vista (algo más, por si el sistema va justo).
 const PANEL_CLOSE_MS: u64 = 460;
+/// Alto máximo (lógico) que puede tener el panel: la copia de lo que hay detrás cubre hasta ahí.
+const PANEL_MAX_HEIGHT: f64 = 900.0;
 
 fn bar_label(monitor: u32) -> String {
     format!("bar-{monitor}")
@@ -64,9 +65,8 @@ pub fn sync_bars(app: &AppHandle, monitors: &[Monitor]) {
                 WebviewWindowBuilder::new(app, &label, url)
                     .title("Tesela Bar")
                     .decorations(false)
+                    // El cristal (tinte y desenfoque de lo que hay detrás) lo dibuja la propia vista, con los valores de Personalización.
                     .transparent(true)
-                    // Desenfoque ligero de lo que hay detrás de la barra (el tinte lo pone la propia vista).
-                    .effects(WindowEffectsConfig { effects: vec![Effect::Blur], state: None, radius: None, color: None, interactive: false })
                     .resizable(false)
                     .skip_taskbar(true)
                     .always_on_top(true)
@@ -144,6 +144,8 @@ fn toggle_panel_inner(app: &AppHandle, monitor: u32, focus: bool) {
                 .title("Tesela Panel")
                 .decorations(false)
                 .transparent(true)
+                // Sin la sombra de Windows: dibujaba un cuadro rectangular alrededor del panel redondeado.
+                .shadow(false)
                 .resizable(false)
                 .skip_taskbar(true)
                 .always_on_top(true)
@@ -180,6 +182,13 @@ fn toggle_panel_inner(app: &AppHandle, monitor: u32, focus: bool) {
     let y = m.work_area.y + margin;
     let _ = window.set_size(PhysicalSize::new(w, h));
     let _ = window.set_position(PhysicalPosition::new(x, y));
+    // Con el panel aún oculto (si se reabre mientras se cierra sigue en pantalla y se conserva la copia anterior)
+    // se guarda lo que hay detrás: la vista lo dibuja desenfocado bajo su tinte. Se guarda siempre (aunque el desenfoque
+    // esté a cero): si se sube desde el propio panel, ya abierto, no se podría copiar lo de detrás sin copiar el panel.
+    if !window.is_visible().unwrap_or(false) {
+        let reach = ((PANEL_MAX_HEIGHT * s) as i32).min(m.work_area.bottom() - y).max(h as i32);
+        crate::infrastructure::windows::backdrop::remember_panel(Rect::new(x, y, w as i32, reach));
+    }
     crate::interface::webview::set_visible(&window, true);
     let _ = window.show();
     // Abierto con el cursor no roba el foco a la app en uso.

@@ -1,9 +1,20 @@
-<!-- Notas rápidas: escribir, pegar, copiar, editar, borrar, buscar y exportar a Markdown o texto plano. -->
+<!-- Notas rápidas: escribir, pegar, copiar, editar, borrar, buscar (por texto y por fecha) y exportar una, varias o todas. -->
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
+  import DateField from "../DateField.svelte";
   import { onPanelClosing } from "../../api/state";
   import type { Note, NotesApi } from "../../api/system";
-  import { exportContent, exportName, filterNotes, formatStamp, type ExportFormat } from "../../stores/notes";
+  import {
+    RANGE_PRESETS,
+    describeRange,
+    exportContent,
+    exportFileName,
+    filterNotes,
+    formatStamp,
+    presetRange,
+    type ExportFormat,
+    type RangePreset,
+  } from "../../stores/notes";
 
   let { api }: { api: NotesApi } = $props();
 
@@ -16,8 +27,38 @@
   let message: string | null = $state(null);
   let error: string | null = $state(null);
   let copiedId: string | null = $state(null);
+  let from = $state("");
+  let to = $state("");
+  let selected: string[] = $state([]);
 
-  const shown = $derived(filterNotes(notes, query));
+  const shown = $derived(filterNotes(notes, query, { from, to }));
+  const filtering = $derived(query.trim() !== "" || from !== "" || to !== "");
+  // Lo que se exporta (y se copia): las notas marcadas, sean las que sean; si no hay ninguna marcada, todas las que se ven.
+  const marked = $derived(notes.filter((n) => selected.includes(n.id)));
+  const target = $derived(marked.length > 0 ? marked : shown);
+  const allShownMarked = $derived(shown.length > 0 && shown.every((n) => selected.includes(n.id)));
+
+  let datesOpen = $state(false);
+  const hasDates = $derived(from !== "" || to !== "");
+  const isPreset = (id: RangePreset) => {
+    const r = presetRange(id);
+    return from === r.from && to === r.to;
+  };
+  // Tocar el atajo que ya está puesto lo quita.
+  const pickPreset = (id: RangePreset) => {
+    if (isPreset(id)) return clearDates();
+    ({ from, to } = presetRange(id));
+  };
+  const clearDates = () => {
+    from = "";
+    to = "";
+  };
+
+  const toggle = (id: string) => (selected = selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  const toggleShown = () => {
+    const ids = shown.map((n) => n.id);
+    selected = allShownMarked ? selected.filter((id) => !ids.includes(id)) : [...new Set([...selected, ...ids])];
+  };
 
   function fail(e: unknown) {
     error = String((e as { message?: string })?.message ?? e);
@@ -140,6 +181,7 @@
     try {
       await api.remove(n.id);
       notes = notes.filter((x) => x.id !== n.id);
+      selected = selected.filter((id) => id !== n.id);
       ok("Nota borrada.");
     } catch (e) {
       fail(e);
@@ -147,24 +189,34 @@
   }
 
   async function exportAs(format: ExportFormat) {
-    if (shown.length === 0) return ok("No hay notas que exportar.");
+    const notesToExport = target;
+    if (notesToExport.length === 0) return ok("No hay notas que exportar.");
     try {
-      const path = await api.exportFile(exportName(format), exportContent(shown, format));
-      ok(`Guardado en ${path}`);
+      const path = await api.exportFile(exportFileName(notesToExport, format), exportContent(notesToExport, format));
+      ok(`${notesToExport.length === 1 ? "Nota guardada" : `${notesToExport.length} notas guardadas`} en ${path}`);
     } catch (e) {
       fail(e);
     }
   }
 
-  async function copyAll() {
-    if (shown.length === 0) return;
+  async function copyTarget() {
+    const notesToCopy = target;
+    if (notesToCopy.length === 0) return;
     try {
-      await api.clipboardWrite(exportContent(shown, "md"));
-      ok(`${shown.length} ${shown.length === 1 ? "nota copiada" : "notas copiadas"} como Markdown.`);
+      await api.clipboardWrite(exportContent(notesToCopy, "md"));
+      ok(`${notesToCopy.length} ${notesToCopy.length === 1 ? "nota copiada" : "notas copiadas"} como Markdown.`);
     } catch (e) {
       fail(e);
     }
   }
+
+  const exportHint = $derived(
+    marked.length > 0
+      ? `Se ${marked.length === 1 ? "exporta la nota seleccionada" : `exportan las ${marked.length} seleccionadas`}`
+      : filtering
+        ? `Se exportan las ${shown.length} encontradas`
+        : "Se exportan todas",
+  );
 </script>
 
 <section class="section notes">
@@ -184,11 +236,64 @@
     </div>
   </div>
 
-  <input class="search" type="search" bind:value={query} placeholder="Buscar en las notas…" aria-label="Buscar notas" />
+  <div class="finder">
+    <input class="search" type="search" bind:value={query} placeholder="Buscar en las notas…" aria-label="Buscar notas" />
+    <button
+      class="filter-toggle"
+      class:active={hasDates}
+      aria-expanded={datesOpen}
+      aria-controls="notes-dates"
+      aria-label="Filtrar por fecha"
+      onclick={() => (datesOpen = !datesOpen)}
+    >
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3.5" y="5" width="17" height="15.5" rx="3" /><path d="M3.5 10h17M8 3v4M16 3v4" />
+      </svg>
+      Fecha
+      {#if hasDates}<i class="dot" aria-hidden="true"></i>{/if}
+    </button>
+  </div>
+
+  {#if datesOpen || hasDates}
+    <div class="dates" id="notes-dates">
+      <div class="chips" role="group" aria-label="Atajos de fecha">
+        {#each RANGE_PRESETS as p (p.id)}
+          <button class="chip" class:on={isPreset(p.id)} aria-pressed={isPreset(p.id)} onclick={() => pickPreset(p.id)}>{p.label}</button>
+        {/each}
+      </div>
+      <div class="range">
+        <div class="date-field">
+          <span>Desde</span>
+          <DateField bind:value={from} label="Desde la fecha" max={to || undefined} />
+        </div>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="date-field">
+          <span>Hasta</span>
+          <DateField bind:value={to} label="Hasta la fecha" min={from || undefined} />
+        </div>
+      </div>
+      {#if hasDates}
+        <div class="summary">
+          <span>{describeRange({ from, to })} · {shown.length} {shown.length === 1 ? "nota" : "notas"}</span>
+          <button class="btn mini" onclick={clearDates}>Quitar fechas</button>
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+  {#if notes.length > 0}
+    <div class="pickbar">
+      <label class="pick all">
+        <input type="checkbox" checked={allShownMarked} disabled={shown.length === 0} onchange={toggleShown} aria-label="Seleccionar las notas que se ven" />
+        {filtering ? "Todas las encontradas" : "Todas"}
+      </label>
+      {#if marked.length > 0}<button class="btn mini" onclick={() => (selected = [])}>Quitar selección ({marked.length})</button>{/if}
+    </div>
+  {/if}
 
   <ul class="list">
     {#each shown as n (n.id)}
-      <li class="note">
+      <li class="note" class:marked={selected.includes(n.id)}>
         {#if editing === n.id}
           <textarea class="edit" bind:value={editText} rows="3" aria-label="Editar nota"></textarea>
           <div class="row">
@@ -198,6 +303,7 @@
         {:else}
           <div class="text">{n.text}</div>
           <div class="row">
+            <input type="checkbox" class="pick" checked={selected.includes(n.id)} onchange={() => toggle(n.id)} aria-label={`Seleccionar nota del ${formatStamp(n.created)}`} />
             <small>{formatStamp(n.created)}{n.updated !== n.created ? " · editada" : ""}</small>
             <span class="spacer"></span>
             <button class="btn mini" onclick={() => copy(n)}>{copiedId === n.id ? "Copiada" : "Copiar"}</button>
@@ -214,11 +320,11 @@
   </ul>
 
   <div class="footer">
-    <span class="hint">{query.trim() ? `Se exportan las ${shown.length} encontradas` : "Se exportan todas"}</span>
+    <span class="hint">{exportHint}</span>
     <span class="spacer"></span>
     <button class="btn mini" onclick={() => exportAs("md")}>Exportar .md</button>
     <button class="btn mini" onclick={() => exportAs("txt")}>Exportar .txt</button>
-    <button class="btn mini" onclick={copyAll}>Copiar todo</button>
+    <button class="btn mini" onclick={copyTarget}>{marked.length > 0 ? "Copiar selección" : "Copiar todo"}</button>
     <button class="btn mini" onclick={() => api.openFolder().catch(fail)}>Abrir carpeta</button>
   </div>
   {#if message}<div class="notice">{message}</div>{/if}
@@ -244,5 +350,39 @@
   small { color: var(--muted); font: 10px var(--mono); }
   .mini { padding: 3px 10px; font-size: 10px; }
   .footer { padding-top: 6px; border-top: 1px dotted var(--line); }
+  .finder { display: flex; gap: 6px; align-items: stretch; }
+  .finder .search { flex: 1; min-width: 0; }
+  .filter-toggle {
+    position: relative; display: inline-flex; align-items: center; gap: 6px; flex: none; cursor: pointer;
+    font: 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line); border-radius: 12px; padding: 0 12px;
+    transition: color 0.25s, border-color 0.25s, background 0.25s;
+  }
+  .filter-toggle:hover, .filter-toggle[aria-expanded="true"] { color: var(--fg); border-color: var(--accent); }
+  .filter-toggle.active { color: var(--accent); border-color: var(--accent); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+  .dates {
+    display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 14px;
+    background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line); animation: dates-in 0.25s cubic-bezier(.2, .8, .2, 1) both;
+  }
+  @keyframes dates-in { from { opacity: 0; transform: translateY(-4px); } }
+  @media (prefers-reduced-motion: reduce) { .dates { animation: none; } }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    font: 11px var(--mono); letter-spacing: 0.04em; color: var(--muted); cursor: pointer; padding: 5px 12px; border-radius: 999px;
+    background: transparent; border: 1px solid var(--line); transition: color 0.25s, background 0.25s, border-color 0.25s, box-shadow 0.25s;
+  }
+  .chip:hover { color: var(--fg); border-color: var(--accent); }
+  .chip.on { color: var(--on-accent); background: var(--accent); border-color: transparent; box-shadow: 0 0 14px -6px var(--accent); }
+  .range { display: flex; align-items: flex-end; gap: 8px; }
+  .arrow { color: var(--muted); font-size: 14px; flex: none; padding-bottom: 8px; }
+  .date-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .date-field span { font: 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-left: 4px; }
+  .summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; font: 11px var(--mono); color: var(--accent); }
+  .pickbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; font: 11px var(--mono); color: var(--muted); }
+  .pick { accent-color: var(--accent); cursor: pointer; width: 15px; height: 15px; margin: 0; }
+  .pick.all { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .note.marked { border-color: var(--accent); background: rgba(255, 255, 255, 0.09); }
   .btn.danger { background: transparent; }
 </style>

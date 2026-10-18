@@ -9,7 +9,7 @@ npm install
 npm run tauri build          # genera el instalador NSIS (usa la configuración de src-tauri/tauri.conf.json)
 ```
 
-Resultado: `src-tauri\target\release\bundle\nsis\Tesela_0.1.0_x64-setup.exe`.
+Resultado: `src-tauri\target\release\bundle\nsis\Tesela_1.1.0_x64-setup.exe`.
 
 - Instala **por usuario**, sin permisos de administrador (`installMode: currentUser`) y en español.
 - Incluye la carpeta `modules\` (notas, apps, portapapeles, velocidad, pareja y el ejemplo) en los recursos de la app; la

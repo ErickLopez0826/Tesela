@@ -1,18 +1,21 @@
-//! Icono en la bandeja del sistema: permite mostrar la ventana, pausar el gestor (devuelve las ventanas a su
-//! sitio), cambiar el arranque con Windows y salir, sin depender de la ventana principal.
+//! Icono en la bandeja del sistema: abre el panel, pausa el gestor (devuelve las ventanas a su sitio), cambia el
+//! arranque con Windows y sale. La app no tiene ventana principal: todo se maneja desde la barra y el panel.
 
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{App, AppHandle, Manager, WindowEvent};
+use tauri::{App, AppHandle, Manager};
 
-const MAIN: &str = "main";
-
-fn show_main(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window(MAIN) {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
+/// Abre (o cierra) el panel en el monitor principal.
+fn toggle_panel(app: &AppHandle) {
+    #[cfg(windows)]
+    {
+        let monitors = crate::infrastructure::windows::facts::list_monitors();
+        if let Some(m) = monitors.iter().find(|m| m.primary).or(monitors.first()) {
+            crate::interface::bar::toggle_panel(app, m.id);
+        }
     }
+    #[cfg(not(windows))]
+    let _ = app;
 }
 
 #[cfg(windows)]
@@ -37,11 +40,10 @@ fn autostart_active() -> bool {
     false
 }
 
-/// Crea el icono de bandeja. Cerrar la ventana principal solo la oculta; «Salir» del menú cierra la app.
-/// Con `background` la ventana principal no se muestra al arrancar.
-pub fn setup(app: &mut App, background: bool) {
+/// Crea el icono de bandeja; «Salir» del menú cierra la app.
+pub fn setup(app: &mut App) {
     let built = (|| -> tauri::Result<()> {
-        let show = MenuItem::with_id(app, "show", "Mostrar ventana", true, None::<&str>)?;
+        let show = MenuItem::with_id(app, "show", "Abrir panel", true, None::<&str>)?;
         let pause = MenuItem::with_id(app, "pause", "Pausar / reanudar gestor de ventanas", true, None::<&str>)?;
         let autostart = CheckMenuItem::with_id(app, "autostart", "Iniciar con Windows", true, autostart_active(), None::<&str>)?;
         let quit = MenuItem::with_id(app, "quit", "Salir", true, None::<&str>)?;
@@ -49,11 +51,11 @@ pub fn setup(app: &mut App, background: bool) {
         let menu = Menu::with_items(app, &[&show, &pause, &autostart, &sep, &quit])?;
 
         let mut builder = TrayIconBuilder::with_id("main")
-            .tooltip("Window Manager")
+            .tooltip("Tesela")
             .menu(&menu)
             .show_menu_on_left_click(false)
             .on_menu_event(move |app, event| match event.id.as_ref() {
-                "show" => show_main(app),
+                "show" => toggle_panel(app),
                 "pause" => {
                     // Misma acción que la tecla de emergencia: pausa el gestor y devuelve las ventanas a su sitio.
                     #[cfg(windows)]
@@ -78,7 +80,7 @@ pub fn setup(app: &mut App, background: bool) {
             })
             .on_tray_icon_event(|tray, event| {
                 if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
-                    show_main(tray.app_handle());
+                    toggle_panel(tray.app_handle());
                 }
             });
         if let Some(icon) = app.default_window_icon() {
@@ -88,21 +90,6 @@ pub fn setup(app: &mut App, background: bool) {
         Ok(())
     })();
     if let Err(e) = built {
-        // Sin bandeja la ventana debe seguir cerrándose normalmente.
         eprintln!("[wm] no se pudo crear el icono de la bandeja: {e}");
-        return;
-    }
-
-    if let Some(w) = app.get_webview_window(MAIN) {
-        let hide_target = w.clone();
-        w.on_window_event(move |ev| {
-            if let WindowEvent::CloseRequested { api, .. } = ev {
-                api.prevent_close();
-                let _ = hide_target.hide();
-            }
-        });
-        if background {
-            let _ = w.hide();
-        }
     }
 }

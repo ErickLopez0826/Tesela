@@ -2,6 +2,7 @@
 
 pub mod apps;
 pub mod clipboard;
+pub mod installed_apps;
 pub mod media;
 pub mod overview;
 pub mod network;

@@ -46,6 +46,31 @@ describe("MediaSection", () => {
     expect(container.querySelector(".art img")?.getAttribute("src")).toBe(art);
   });
 
+  it("al cambiar de canción la portada nueva entra y la anterior se desvanece antes de retirarse", async () => {
+    vi.useFakeTimers();
+    try {
+      const a = "data:image/png;base64,AAAA";
+      const b = "data:image/png;base64,BBBB";
+      const { container, rerender } = render(MediaSection, { media, volume: null, art: a, onCommand: vi.fn(), onVolume: vi.fn(), onMute: vi.fn() });
+      expect(container.querySelectorAll(".art img").length).toBe(1);
+      await rerender({ art: b });
+      expect(container.querySelector(".art img.out")?.getAttribute("src")).toBe(a);
+      expect(container.querySelector(".art img.in")?.getAttribute("src")).toBe(b);
+      await vi.advanceTimersByTimeAsync(600);
+      expect(container.querySelector(".art img.out")).toBeNull();
+      expect(container.querySelector(".art img.in")?.getAttribute("src")).toBe(b);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("el volumen es una barra con su círculo, llena hasta el valor", () => {
+    const { container } = render(MediaSection, { media: null, volume: { percent: 40, muted: false }, onCommand: vi.fn(), onVolume: vi.fn(), onMute: vi.fn() });
+    expect(container.querySelector(".slider .fill")).toBeTruthy();
+    expect(container.querySelector(".slider .thumb")).toBeTruthy();
+    expect((container.querySelector(".slider") as HTMLElement).style.getPropertyValue("--p")).toBe("40%");
+  });
+
   it("sin nada sonando los controles están desactivados", () => {
     render(MediaSection, { media: null, volume: null, onCommand: vi.fn(), onVolume: vi.fn(), onMute: vi.fn() });
     expect(screen.getByText("No suena nada.")).toBeTruthy();
@@ -125,6 +150,15 @@ describe("PowerSection", () => {
     await fireEvent.click(screen.getByText("Sí"));
     expect(onRun).toHaveBeenCalledWith("shutdown");
     await waitFor(() => expect(screen.getByText("Simulado: se habría pedido apagar el equipo")).toBeTruthy());
+  });
+
+  it("la confirmación centra la pregunta y usa botones grandes", async () => {
+    const { container } = render(PowerSection, { allowChanges: true, onRun: vi.fn() });
+    await fireEvent.click(screen.getByText("Hibernar"));
+    expect(container.querySelector(".ask .question")?.textContent).toContain("¿Hibernar el equipo?");
+    const buttons = [...container.querySelectorAll(".answers button")];
+    expect(buttons.map((b) => b.textContent?.trim())).toEqual(["Sí", "Cancelar"]);
+    expect(buttons.every((b) => b.classList.contains("big"))).toBe(true);
   });
 
   it("cancelar no ejecuta nada", async () => {

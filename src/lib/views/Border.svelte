@@ -4,10 +4,17 @@
      fotograma y mantenían ocupado al proceso gráfico de WebView2. Además van «a saltos» de 40 ms (25 fotogramas por
      segundo): a esa velocidad un resplandor lento se ve igual de suave y se produce menos de la mitad de fotogramas
      (cada uno cuesta lo mismo aunque cambie poco). Las dos duran lo mismo para que sus saltos coincidan. -->
-<div class="ring">
-  <div class="glow"></div>
-  <div class="trail"><div class="sweep"></div></div>
-</div>
+<script lang="ts">
+  import { theme } from "../stores/theme";
+</script>
+
+<!-- «Sin marco» no dibuja nada; «fijo» deja el anillo quieto; «animado» añade el pulso y el destello que recorre el contorno. -->
+{#if $theme.borderStyle !== "off"}
+  <div class="ring" class:steady={$theme.borderStyle === "steady"}>
+    <div class="glow"></div>
+    {#if $theme.borderStyle === "animated"}<div class="trail"><div class="sweep"></div></div>{/if}
+  </div>
+{/if}
 
 <style>
   :global(html, body) { margin: 0; height: 100%; background: transparent; overflow: hidden; }
@@ -34,6 +41,7 @@
     animation: travel 3.2s steps(80) infinite;
     will-change: transform;
   }
+  .steady .glow { animation: none; }
   @keyframes pulse { 50% { opacity: 0.4; } }
   @keyframes travel { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .glow, .sweep { animation: none; } }

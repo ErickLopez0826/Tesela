@@ -36,11 +36,11 @@
 <section class="section">
   <h3>Energía {#if !allowChanges}<span class="badge safe">modo seguro: simulado</span>{/if}</h3>
   {#if pending}
-    <div class="notice">
-      {actions.find((a) => a.name === pending)?.confirm}
-      <div class="buttons ask">
-        <button class="btn danger" onclick={() => confirm(pending!)}>Sí</button>
-        <button class="btn" onclick={() => (pending = null)}>Cancelar</button>
+    <div class="ask">
+      <p class="question">{actions.find((a) => a.name === pending)?.confirm}</p>
+      <div class="answers">
+        <button class="btn danger big" onclick={() => confirm(pending!)}>Sí</button>
+        <button class="btn big" onclick={() => (pending = null)}>Cancelar</button>
       </div>
     </div>
   {:else}
@@ -58,7 +58,11 @@
 </section>
 
 <style>
-  .ask { margin-top: 6px; }
+  /* Confirmación: la pregunta y dos botones grandes, centrados. */
+  .ask { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 18px 12px; text-align: center; }
+  .question { margin: 0; font: 600 18px "Segoe UI", system-ui, sans-serif; }
+  .answers { display: flex; justify-content: center; gap: 14px; width: 100%; }
+  .big { flex: 0 1 190px; min-height: 52px; padding: 0 22px; border-radius: 16px; font-size: 16px; font-weight: 600; }
   .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
   .tile { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 8px; border-radius: 20px; color: var(--fg); background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); font: 600 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: background 0.35s, border-color 0.35s, box-shadow 0.35s, transform 0.35s cubic-bezier(.3, 1.6, .5, 1); }
   .tile:hover { transform: translateY(-2px); border-color: var(--accent); background: rgba(255, 255, 255, 0.1); box-shadow: 0 8px 22px -12px rgba(255, 255, 255, 0.7); }

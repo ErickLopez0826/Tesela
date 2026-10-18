@@ -3,9 +3,10 @@
   import { runAction } from "../api/state";
   import { systemApi } from "../api/system";
   import BarView from "../components/BarView.svelte";
+  import { installBorderSync } from "../stores/borderSync";
   import { createPollingStore } from "../stores/polling";
   import { createModulesStore } from "../stores/modules";
-  import { meridaTemperature } from "../stores/weather";
+  import { merida } from "../stores/weather";
   import { createStateStore, createStatsStore } from "../stores/wmState";
 
   // El id del monitor llega en la URL de la ventana: ?view=bar&monitor=<id>
@@ -21,12 +22,14 @@
   let clock: ReturnType<typeof setInterval>;
 
   onMount(() => {
+    const stopBorderSync = installBorderSync();
     void stateStore.start();
     void modules.start();
     statsStore.start();
     volume.start();
     overview.start();
     clock = setInterval(() => (now = new Date()), 1000);
+    return stopBorderSync;
   });
 
   onDestroy(() => {
@@ -45,7 +48,8 @@
   stats={$statsStore}
   volume={$volume}
   gpu={$overview?.gpu_percent ?? null}
-  temperature={$meridaTemperature}
+  temperature={$merida?.temperature ?? null}
+  weatherCode={$merida?.code ?? null}
   modules={$modules}
   {now}
   onWorkspace={(n) => void runAction(`workspace_${n}`).catch(() => {})}

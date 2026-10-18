@@ -1,6 +1,6 @@
 <script lang="ts">
   import "../styles/panel.css";
-  import type { StateSnapshot } from "../api/state";
+  import type { TasksApi } from "../api/tasks";
   import type {
     ActionOutcome,
     MediaCommandName,
@@ -21,19 +21,22 @@
   import { describeWeather, type Weather } from "../stores/weather";
   import type { InstalledModule } from "../api/modules";
   import DotField from "./DotField.svelte";
+  import GlassBackdrop from "./GlassBackdrop.svelte";
+  import { theme } from "../stores/theme";
   import WeatherIcon from "./WeatherIcon.svelte";
   import ModuleSections from "./ModuleSections.svelte";
   import AppearancePanel from "./AppearancePanel.svelte";
+  import SettingsPanel from "./SettingsPanel.svelte";
   import ConnectivitySection from "./sections/ConnectivitySection.svelte";
   import EngineWallpapers from "./sections/EngineWallpapers.svelte";
   import NotesSection from "./sections/NotesSection.svelte";
   import MediaSection from "./sections/MediaSection.svelte";
   import PowerSection from "./sections/PowerSection.svelte";
   import StatsSection from "./sections/StatsSection.svelte";
+  import TasksSection from "./sections/TasksSection.svelte";
   import WallpaperSection from "./sections/WallpaperSection.svelte";
 
   let {
-    state: snapshot,
     now,
     overview,
     media,
@@ -47,13 +50,13 @@
     network = null,
     audio = null,
     notes = null,
+    tasks = null,
     engine = null,
     onEngineApply = async () => ({ simulated: true, description: "" }),
     onAudioChanged = () => {},
     openTick = 0,
     closeTick = 0,
     onResize = () => {},
-    onWorkspace,
     onClose,
     onMediaCommand,
     onVolume,
@@ -62,7 +65,6 @@
     onPower,
     onWallpaper,
   }: {
-    state: StateSnapshot | null;
     now: Date;
     overview: SystemOverview | null;
     media: MediaInfo | null;
@@ -91,7 +93,6 @@
     closeTick?: number;
     /// Alto (lógico) que necesita la pestaña visible: la ventana se ajusta a él.
     onResize?: (height: number) => void;
-    onWorkspace: (number: number) => void;
     onClose: () => void;
     onMediaCommand: (command: MediaCommandName) => void;
     onVolume: (percent: number) => void;
@@ -123,7 +124,7 @@
     }
   });
 
-  type TabId = "today" | "controls" | "stats" | "notes" | "modules" | "wallpaper" | "power" | "appearance";
+  type TabId = "today" | "controls" | "stats" | "notes" | "modules" | "wallpaper" | "power" | "appearance" | "settings";
   const TABS: { id: TabId; label: string }[] = [
     { id: "controls", label: "Controles" },
     { id: "today", label: "Hoy" },
@@ -132,6 +133,7 @@
     { id: "wallpaper", label: "Fondos" },
     { id: "power", label: "Energía" },
     { id: "appearance", label: "Personalización" },
+    { id: "settings", label: "Ajustes" },
     { id: "modules", label: "Módulos" },
   ];
   let tabId: TabId = $state("today");
@@ -209,6 +211,8 @@
 <svelte:window onkeydown={(e) => e.key === "Escape" && onClose()} />
 
 <div class="shell open" bind:this={shell} style:height={`${tabHeight}px`}>
+  <GlassBackdrop kind="panel" blur={$theme.panelBlur} tick={openTick} />
+  <div class="tint" aria-hidden="true"></div>
   <DotField fixed={false} />
   <div class="panel">
     <nav class="tabs" aria-label="Secciones del panel" bind:this={tabsEl}>
@@ -253,18 +257,11 @@
               </div>
               <div class="date long">{date}</div>
             </section>
-            <section class="section">
-              <h3>Workspaces</h3>
-              <div class="grid">
-                {#each snapshot?.workspaces ?? [] as w (w.number)}
-                  <button class="ws" class:visible={w.visible} class:active={w.active} onclick={() => onWorkspace(w.number)}>
-                    <strong>{w.number}</strong>
-                    <small>{w.window_count} {w.window_count === 1 ? "ventana" : "ventanas"}</small>
-                  </button>
-                {/each}
-              </div>
-              {#if !snapshot}<p class="hint">El gestor de ventanas no está activo.</p>{/if}
-            </section>
+            {#if tasks}
+              <TasksSection api={tasks} />
+            {:else}
+              <section class="section"><h3>Tareas</h3><p class="hint">Las tareas no están disponibles.</p></section>
+            {/if}
           </div>
         {:else if tabId === "controls"}
           <div class="cols">
@@ -273,6 +270,8 @@
           </div>
         {:else if tabId === "appearance"}
           <div class="cols"><section class="section appearance"><AppearancePanel /></section></div>
+        {:else if tabId === "settings"}
+          <div class="cols"><section class="section settings-section"><SettingsPanel tick={openTick} /></section></div>
         {:else if tabId === "stats"}
           <StatsSection {overview} />
         {:else if tabId === "notes"}
@@ -311,8 +310,9 @@
   .shell {
     position: relative; box-sizing: border-box; overflow: hidden; transition: height 0.38s cubic-bezier(.22, 1, .36, 1);
     border: 1px solid var(--line, rgba(255, 255, 255, 0.14)); border-radius: 22px;
-    background: #0a0a0b;
   }
+  /* Tinte del cristal: su opacidad es la de Personalización (opaco por defecto). */
+  .tint { position: absolute; inset: 0; z-index: 0; pointer-events: none; background: rgba(10, 10, 11, var(--panel-alpha, 1)); }
   .shell.open { animation: drop 0.5s cubic-bezier(.22, 1, .36, 1) both; }
   .shell.open .panel { animation: content-in 0.35s ease 0.12s both; }
   @keyframes drop {
@@ -341,7 +341,7 @@
   .measure { display: flow-root; }
   .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; align-items: start; }
   .cols :global(.section) { margin: 0; }
-  .cols.today { grid-template-columns: 1fr 1.3fr 0.9fr; }
+  .cols.today { grid-template-columns: 0.9fr 1.05fr 1.45fr; }
 
   .clock-card { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; }
   .time { display: flex; align-items: center; justify-content: center; gap: 10px; }
@@ -367,12 +367,5 @@
   .day small { opacity: 0.6; font: 10px var(--mono); text-transform: uppercase; }
   .day strong { font: 500 15px var(--mono); }
   .day.today { background: var(--accent); color: var(--on-accent); box-shadow: 0 0 16px -6px var(--accent); }
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-  .ws { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 7px 2px; color: inherit; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line); border-radius: 14px; cursor: pointer; font: inherit; transition: background 0.4s ease, border-color 0.4s ease, transform 0.4s cubic-bezier(.3, 1.6, .5, 1), box-shadow 0.4s ease; }
-  .ws:hover { transform: translateY(-2px); border-color: var(--accent); }
-  .ws.visible { border-color: rgba(255, 255, 255, 0.6); }
-  .ws.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); box-shadow: 0 0 16px -6px var(--accent); }
-  .ws strong { font: 500 14px var(--mono); }
-  .ws small { color: inherit; opacity: 0.65; font: 9px var(--mono); }
   @media (prefers-reduced-motion: reduce) { .shell.open, .shell.open .panel, .shell.closing, .shell.closing .panel, .content { animation: none; } }
 </style>

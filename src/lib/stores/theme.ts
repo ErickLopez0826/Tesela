@@ -2,6 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { writable, get } from "svelte/store";
 
 /** Colores personalizables de la interfaz. En modo «fondo» todos se derivan del color del fondo de pantalla. */
+export type BorderStyle = "animated" | "steady" | "off";
+export const BORDER_STYLES: BorderStyle[] = ["animated", "steady", "off"];
+
 export interface Theme {
   mode: "custom" | "wallpaper";
   /** Pestañas activas, botones destacados, volumen, hoy en la semana… */
@@ -10,11 +13,33 @@ export interface Theme {
   workspace: string;
   /** Marco animado de la ventana en uso. */
   frame: string;
+  /** Cómo se dibuja ese marco: animado (palpita y un destello lo recorre), fijo (sin animación) o sin marco. */
+  borderStyle: BorderStyle;
   /** Puntos del fondo y su luz. */
   dots: string;
+  /** Cristal de la barra y del panel. Transparencia: 0 = tinte opaco. Desenfoque: 0 = se ve lo de detrás sin difuminar. */
+  barTransparency: number;
+  barBlur: number;
+  panelTransparency: number;
+  panelBlur: number;
 }
 
-export const DEFAULT_THEME: Theme = { mode: "custom", accent: "#f2f2f2", workspace: "#f2f2f2", frame: "#ffffff", dots: "#ffffff" };
+/** Lo más transparente que puede ser el tinte (con menos, el texto no se leería). */
+export const MAX_TRANSPARENCY = 90;
+
+export const DEFAULT_THEME: Theme = {
+  mode: "custom",
+  accent: "#f2f2f2",
+  workspace: "#f2f2f2",
+  frame: "#ffffff",
+  borderStyle: "animated",
+  dots: "#ffffff",
+  // La barra es de cristal (tinte al 58 % sobre el fondo desenfocado); el panel, opaco.
+  barTransparency: 42,
+  barBlur: 40,
+  panelTransparency: 0,
+  panelBlur: 0,
+};
 
 const KEY = "wm-theme";
 const WALLPAPER_EVERY_MS = 15_000;
@@ -73,12 +98,18 @@ export function accentFromWallpaper(hex: string): string {
 export function sanitize(raw: unknown): Theme {
   const t = (raw && typeof raw === "object" ? raw : {}) as Partial<Theme>;
   const color = (v: unknown, fallback: string) => (typeof v === "string" && parseHex(v) ? v.toLowerCase() : fallback);
+  const level = (v: unknown, fallback: number, max: number) => (typeof v === "number" && Number.isFinite(v) ? Math.round(Math.max(0, Math.min(max, v))) : fallback);
   return {
     mode: t.mode === "wallpaper" ? "wallpaper" : "custom",
     accent: color(t.accent, DEFAULT_THEME.accent),
     workspace: color(t.workspace, DEFAULT_THEME.workspace),
     frame: color(t.frame, DEFAULT_THEME.frame),
+    borderStyle: BORDER_STYLES.includes(t.borderStyle as BorderStyle) ? (t.borderStyle as BorderStyle) : DEFAULT_THEME.borderStyle,
     dots: color(t.dots, DEFAULT_THEME.dots),
+    barTransparency: level(t.barTransparency, DEFAULT_THEME.barTransparency, MAX_TRANSPARENCY),
+    barBlur: level(t.barBlur, DEFAULT_THEME.barBlur, 100),
+    panelTransparency: level(t.panelTransparency, DEFAULT_THEME.panelTransparency, MAX_TRANSPARENCY),
+    panelBlur: level(t.panelBlur, DEFAULT_THEME.panelBlur, 100),
   };
 }
 
@@ -114,6 +145,9 @@ export function cssVars(t: Theme, wallpaper: string | null): Record<string, stri
     "--ws-on": onColor(auto ?? t.workspace),
     "--frame": channels(auto ?? t.frame),
     "--dot": channels(auto ?? t.dots),
+    // Opacidad del tinte de la barra y del panel (lo contrario de la transparencia).
+    "--bar-alpha": String(+(1 - t.barTransparency / 100).toFixed(2)),
+    "--panel-alpha": String(+(1 - t.panelTransparency / 100).toFixed(2)),
   };
 }
 
@@ -129,6 +163,17 @@ export function refreshWallpaperTheme() {
   } catch {
     /* sin almacenamiento: se actualizará con el sondeo */
   }
+}
+
+/** Avisa cuando el fondo de pantalla cambió (en esta ventana o en otra). Devuelve cómo dejar de escuchar. */
+export function onWallpaperChanged(callback: () => void): () => void {
+  const onStorage = (e: StorageEvent) => e.key === WALLPAPER_CHANGED_KEY && callback();
+  window.addEventListener("storage", onStorage);
+  window.addEventListener("wm-wallpaper-changed", callback);
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener("wm-wallpaper-changed", callback);
+  };
 }
 
 /** Aplica el tema en esta ventana y lo mantiene al día: cambios hechos en otra ventana y cambios del fondo de pantalla. */

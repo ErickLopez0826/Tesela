@@ -97,3 +97,56 @@ fn la_barra_reserva_su_espacio_y_las_ventanas_no_se_le_encimas() {
         baseline.iter().all(|b| now.iter().any(|n| n.id == b.id && n.work_area == b.work_area))
     });
 }
+
+/// Ventanas visibles de un proceso.
+fn visible_windows_of(pid: u32) -> Vec<(String, String)> {
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, IsWindowVisible};
+    struct Ctx {
+        pid: u32,
+        found: Vec<isize>,
+    }
+    unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
+        let ctx = &mut *(lparam.0 as *mut Ctx);
+        let mut owner = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut owner));
+        if owner == ctx.pid && IsWindowVisible(hwnd).as_bool() {
+            ctx.found.push(hwnd.0 as isize);
+        }
+        true.into()
+    }
+    let mut ctx = Ctx { pid, found: Vec::new() };
+    unsafe {
+        let _ = EnumWindows(Some(each), LPARAM(&mut ctx as *mut _ as isize));
+    }
+    ctx.found
+        .into_iter()
+        .filter_map(|h| facts_of(h))
+        .map(|f| (f.title, f.class))
+        .collect()
+}
+
+#[test]
+#[ignore = "arranca la app real unos segundos, sin barra y sin gestionar ninguna ventana tuya"]
+fn al_abrir_la_app_no_aparece_ninguna_ventana_principal() {
+    let config = std::env::temp_dir().join("wm-test-config-nowindow");
+    let state = std::env::temp_dir().join("wm-test-state-nowindow");
+    let _ = std::fs::remove_dir_all(&config);
+    let exe = std::env::var_os("WM_TEST_EXE").unwrap_or_else(|| env!("CARGO_BIN_EXE_tesela").into());
+    let mut app = Command::new(exe)
+        .args(["--manage", "prefix:WMNADA"])
+        .env("WM_CONFIG_DIR", &config)
+        .env("WM_STATE_DIR", &state)
+        .spawn()
+        .expect("arrancar la app");
+    std::thread::sleep(Duration::from_secs(5));
+    let alive = app.try_wait().expect("estado del proceso").is_none();
+    // Internas y sin imagen: el borde animado (transparente, sin ventana a la que rodear) y el receptor de eventos del sistema.
+    let visible: Vec<_> = visible_windows_of(app.id())
+        .into_iter()
+        .filter(|(title, class)| title != "Tesela Border" && class != "Tao Thread Event Target")
+        .collect();
+    let _ = app.kill();
+    assert!(alive, "la app no debe terminar sola por no tener ventanas");
+    assert!(visible.is_empty(), "no debe haber ninguna ventana visible, pero hay: {visible:?}");
+}
