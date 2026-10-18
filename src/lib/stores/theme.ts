@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { writable, get } from "svelte/store";
 
 /** Colores personalizables de la interfaz. En modo «fondo» todos se derivan del color del fondo de pantalla. */
@@ -151,8 +152,10 @@ export function cssVars(t: Theme, wallpaper: string | null): Record<string, stri
   };
 }
 
-export function applyTheme(t: Theme, wallpaper: string | null, root: HTMLElement = document.documentElement) {
+/** `source` dice de dónde viene el cambio de color: de un botón (la ola nace donde se pulsó) o del fondo de pantalla (nace en el centro). */
+export function applyTheme(t: Theme, wallpaper: string | null, root: HTMLElement = document.documentElement, source: "theme" | "wallpaper" = "theme") {
   for (const [k, v] of Object.entries(cssVars(t, wallpaper))) root.style.setProperty(k, v);
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("wm-theme-applied", { detail: { source } }));
 }
 
 /** Avisa a todas las ventanas de que el fondo cambió, para que vuelvan a leer su color sin esperar al sondeo. */
@@ -179,7 +182,7 @@ export function onWallpaperChanged(callback: () => void): () => void {
 /** Aplica el tema en esta ventana y lo mantiene al día: cambios hechos en otra ventana y cambios del fondo de pantalla. */
 export function installTheme(): () => void {
   let wallpaper: string | null = null;
-  const apply = () => applyTheme(get(theme), wallpaper);
+  const apply = (source: "theme" | "wallpaper" = "theme") => applyTheme(get(theme), wallpaper, document.documentElement, source);
   const refreshWallpaper = async () => {
     if (get(theme).mode !== "wallpaper" || document.visibilityState === "hidden") return;
     try {
@@ -187,7 +190,7 @@ export function installTheme(): () => void {
     } catch {
       wallpaper = null;
     }
-    apply();
+    apply("wallpaper");
   };
   const unsubscribe = theme.subscribe(() => {
     apply();
@@ -200,6 +203,16 @@ export function installTheme(): () => void {
   window.addEventListener("storage", onStorage);
   // La ventana que cambió el fondo no recibe su propio evento: se lee de nuevo también aquí.
   const selfRefresh = () => void refreshWallpaper();
+  // El borde de la ventana en uso es una sola ventana que cambia de monitor: el núcleo avisa y toma al momento el color
+  // del fondo del monitor nuevo.
+  let stopMonitor: (() => void) | undefined;
+  try {
+    void Promise.resolve(listen("wm-border-monitor", () => void refreshWallpaper()))
+      .then((un) => (stopMonitor = un))
+      .catch(() => {});
+  } catch {
+    /* sin núcleo (pruebas) */
+  }
   window.addEventListener("wm-wallpaper-changed", selfRefresh);
   const timer = setInterval(refreshWallpaper, WALLPAPER_EVERY_MS);
   // Al volver a mostrarse (panel que se abre) se pone al día enseguida: mientras estuvo oculto no se consultó.
@@ -207,6 +220,7 @@ export function installTheme(): () => void {
   document.addEventListener("visibilitychange", onVisible);
   return () => {
     document.removeEventListener("visibilitychange", onVisible);
+    stopMonitor?.();
     unsubscribe();
     window.removeEventListener("storage", onStorage);
     window.removeEventListener("wm-wallpaper-changed", selfRefresh);

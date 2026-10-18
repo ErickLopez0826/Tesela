@@ -214,7 +214,15 @@ pub fn forget_panel() {
     *PANEL.lock().unwrap() = None;
 }
 
-pub fn panel_image(intensity: f32, scale: f64) -> Option<GlassImage> {
+/// Imagen para el panel. Con `refresh` (cambió el fondo de pantalla con el panel abierto) se vuelve a copiar el fondo de
+/// pantalla de su zona: con el panel encima no se puede copiar la pantalla entera, así que se ven solo el fondo, sin ventanas.
+pub fn panel_image(intensity: f32, scale: f64, refresh: bool) -> Option<GlassImage> {
+    if refresh {
+        let area = PANEL.lock().unwrap().as_ref().map(|raw| raw.src);
+        if let Some(fresh) = area.and_then(capture_wallpaper) {
+            *PANEL.lock().unwrap() = Some(fresh);
+        }
+    }
     let raw = PANEL.lock().unwrap().clone()?;
     Some(render(&raw, intensity, scale))
 }

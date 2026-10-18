@@ -1,6 +1,8 @@
 <!-- Ajustes generales: arrancar con Windows, aplicaciones que se abren con Tesela y cerrar o reiniciar la app. -->
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import type { GeneralStatus } from "../api/general";
+  import type { ShellSettings } from "../api/shell";
   import type { AppSuggestion, StartupApp } from "../api/apps";
   import { clampPage, pageCount, slicePage } from "../stores/engine";
   import AppPicker from "./AppPicker.svelte";
@@ -14,6 +16,8 @@
     onQuit,
     onRestart,
     loadApps,
+    shell = null,
+    onShell = async (s) => s,
   }: {
     status: GeneralStatus | null;
     /** Aplicaciones que se abren junto con Tesela, cada una con su workspace. */
@@ -26,12 +30,34 @@
     /** Vuelve a abrir la app como estaba (con o sin gestor de ventanas y barra). */
     onRestart: (manage: boolean, bar: boolean) => Promise<void>;
     loadApps?: () => Promise<AppSuggestion[]>;
+    /** Lo que Tesela reemplaza de Windows. */
+    shell?: ShellSettings | null;
+    onShell?: (settings: ShellSettings) => Promise<ShellSettings>;
   } = $props();
+
+  /** El valor mostrado: el que llega y, tras guardar, el que devuelve el guardado. */
+  let savedShell: ShellSettings | null = $state(null);
+  const shellNow = $derived(savedShell ?? shell);
+  const changeShell = (patch: Partial<ShellSettings>) =>
+    shellNow ? run(async () => (savedShell = await onShell({ ...shellNow, ...patch }))) : Promise.resolve();
 
   const PER_PAGE = 10;
   const WORKSPACES = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
   let error: string | null = $state(null);
+  /** Cerrar Tesela pide confirmación: el primer toque la pide y, si no se confirma, se retira sola. */
+  let confirmingQuit = $state(false);
+  let quitTimer: ReturnType<typeof setTimeout> | undefined;
+  function askQuit() {
+    confirmingQuit = true;
+    clearTimeout(quitTimer);
+    quitTimer = setTimeout(() => (confirmingQuit = false), 5000);
+  }
+  function cancelQuit() {
+    clearTimeout(quitTimer);
+    confirmingQuit = false;
+  }
+  onDestroy(() => clearTimeout(quitTimer));
   let query = $state("");
   let picked: AppSuggestion | null = $state(null);
   let newWorkspace = $state(1);
@@ -77,6 +103,21 @@
       Iniciar Tesela al entrar en Windows
     </label>
   </section>
+
+  {#if shellNow}
+    <section>
+      <h2>Interfaz de Windows</h2>
+      <label class="check">
+        <input type="checkbox" checked={shellNow.replace_taskbar} onchange={(e) => changeShell({ replace_taskbar: (e.currentTarget as HTMLInputElement).checked })} />
+        Reemplazar la barra de tareas de Windows por la de Tesela
+      </label>
+      <label class="check">
+        <input type="checkbox" checked={shellNow.win_key_panel} onchange={(e) => changeShell({ win_key_panel: (e.currentTarget as HTMLInputElement).checked })} />
+        La tecla Windows abre el panel de Tesela (los atajos con Windows, como Win+Shift+S, siguen igual)
+      </label>
+      <p class="hint">Al cerrar Tesela, la barra de tareas y la tecla Windows vuelven a ser las de siempre.</p>
+    </section>
+  {/if}
 
   <section>
     <h2>Aplicaciones de arranque</h2>
@@ -127,8 +168,13 @@
 
   <section>
     <div class="row">
-      <button class="close" onclick={() => run(onQuit)}>Cerrar Tesela</button>
-      <button onclick={() => run(() => onRestart(status.managing, status.bar))}>Reiniciar Tesela</button>
+      {#if confirmingQuit}
+        <button class="close" onclick={() => run(onQuit)}>Sí, cerrar</button>
+        <button onclick={cancelQuit}>Cancelar</button>
+      {:else}
+        <button class="close" onclick={askQuit}>Cerrar Tesela</button>
+        <button onclick={() => run(() => onRestart(status.managing, status.bar))}>Reiniciar Tesela</button>
+      {/if}
     </div>
     <p class="hint">Al cerrar, las ventanas vuelven a su sitio y desaparecen la barra y el icono de la bandeja.</p>
   </section>

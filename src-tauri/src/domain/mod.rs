@@ -9,6 +9,7 @@ pub mod layout;
 pub mod manageable;
 pub mod modules;
 pub mod rules;
+pub mod shell;
 pub mod shortcuts;
 pub mod snapshot;
 pub mod startup;

@@ -66,6 +66,8 @@ describe("SettingsPanel", () => {
     await fireEvent.click(screen.getByRole("button", { name: "General" }));
     await waitFor(() => expect(screen.getByLabelText(/Iniciar Tesela al entrar en Windows/)).toBeTruthy());
     await fireEvent.click(screen.getByRole("button", { name: "Cerrar Tesela" }));
+    expect(invoke).not.toHaveBeenCalledWith("quit_app");
+    await fireEvent.click(screen.getByRole("button", { name: "Sí, cerrar" }));
     expect(invoke).toHaveBeenCalledWith("quit_app");
   });
 

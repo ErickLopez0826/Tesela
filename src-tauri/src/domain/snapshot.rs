@@ -24,6 +24,20 @@ pub struct WorkspaceSnapshot {
     pub window_count: usize,
 }
 
+/// Una ventana seguida, para la barra de tareas: a qué workspace pertenece y cómo se llama.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct WindowSnapshot {
+    pub id: isize,
+    /// Workspace (1 a 9) donde está.
+    pub workspace: usize,
+    pub title: String,
+    /// Nombre del ejecutable (sin `.exe`, en minúsculas).
+    pub exe: String,
+    /// Es la ventana con el foco del workspace activo.
+    pub focused: bool,
+    pub minimized: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FocusedSnapshot {
     pub exe: String,
@@ -47,6 +61,8 @@ pub struct StateSnapshot {
     pub paused: bool,
     /// Modo de teclado activo (p. ej. "resize").
     pub mode: Option<String>,
+    /// Ventanas gestionadas, por workspace (de ahí sale la barra de tareas).
+    pub windows: Vec<WindowSnapshot>,
 }
 
 /// Estado de ejemplo (3 workspaces, una ventana enfocada) para las pruebas de extremo a extremo.
@@ -59,5 +75,6 @@ pub fn sample_state() -> StateSnapshot {
         focused: Some(FocusedSnapshot { exe: "ejemplo.exe".into(), title: "Ventana de ejemplo".into() }),
         paused: false,
         mode: None,
+        windows: vec![],
     }
 }

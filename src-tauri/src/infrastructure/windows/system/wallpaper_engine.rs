@@ -177,6 +177,10 @@ impl EngineControl for WallpaperEngine {
         preview_of_current(&self.current(), &self.items())
     }
 
+    fn current_preview_for(&mut self, monitor: u32) -> Option<String> {
+        preview_of_monitor(&self.current(), &self.items(), monitor)
+    }
+
     fn current(&mut self) -> Vec<EngineCurrent> {
         WallpaperEngine::current(self)
     }
@@ -187,6 +191,16 @@ pub fn preview_of_current(current: &[EngineCurrent], items: &[EngineWallpaper]) 
     let mut sorted: Vec<&EngineCurrent> = current.iter().collect();
     sorted.sort_by_key(|c| c.monitor);
     sorted.iter().find_map(|c| items.iter().find(|w| w.id == c.id).and_then(|w| w.preview.clone()))
+}
+
+/// Previsualización del fondo del monitor indicado; si ese monitor no tiene una conocida, la de `preview_of_current`.
+pub fn preview_of_monitor(current: &[EngineCurrent], items: &[EngineWallpaper], monitor: u32) -> Option<String> {
+    current
+        .iter()
+        .find(|c| c.monitor == monitor)
+        .and_then(|c| items.iter().find(|w| w.id == c.id))
+        .and_then(|w| w.preview.clone())
+        .or_else(|| preview_of_current(current, items))
 }
 
 /// Cuando Wallpaper Engine no está instalado.
@@ -270,6 +284,19 @@ mod tests {
         assert_eq!(preview_of_current(&[cur(0, "c"), cur(1, "b")], &items), Some("b.gif".into()));
         assert_eq!(preview_of_current(&[cur(0, "zzz")], &items), None);
         assert_eq!(preview_of_current(&[], &items), None);
+    }
+
+    #[test]
+    fn cada_monitor_usa_la_previsualizacion_de_su_propio_fondo() {
+        let item = |id: &str, p: Option<&str>| EngineWallpaper { id: id.into(), title: id.into(), kind: String::new(), preview: p.map(str::to_string) };
+        let items = vec![item("a", Some("a.jpg")), item("b", Some("b.gif")), item("c", None)];
+        let cur = |m, id: &str| EngineCurrent { monitor: m, id: id.into() };
+        let current = [cur(0, "a"), cur(1, "b"), cur(2, "c")];
+        assert_eq!(preview_of_monitor(&current, &items, 0), Some("a.jpg".into()));
+        assert_eq!(preview_of_monitor(&current, &items, 1), Some("b.gif".into()));
+        // Sin imagen propia (o sin entrada) se cae a la del principal.
+        assert_eq!(preview_of_monitor(&current, &items, 2), Some("a.jpg".into()));
+        assert_eq!(preview_of_monitor(&current, &items, 7), Some("a.jpg".into()));
     }
 
     #[test]

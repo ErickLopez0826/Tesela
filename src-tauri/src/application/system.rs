@@ -46,6 +46,10 @@ pub trait EngineControl: Send {
     fn current_preview(&mut self) -> Option<String> {
         None
     }
+    /// Previsualización del fondo puesto en un monitor concreto (si no la hay, la del principal).
+    fn current_preview_for(&mut self, _monitor: u32) -> Option<String> {
+        self.current_preview()
+    }
     /// Qué fondo tiene puesto cada monitor ahora.
     fn current(&mut self) -> Vec<crate::domain::system::EngineCurrent> {
         vec![]

@@ -5,6 +5,7 @@
   import GeneralPanel from "./GeneralPanel.svelte";
   import { appsApi, type StartupApp } from "../api/apps";
   import { generalApi, type GeneralStatus } from "../api/general";
+  import { shellApi, type ShellSettings } from "../api/shell";
   import { exclusionsStore } from "../stores/exclusions";
   import { windowsStore } from "../stores/windows";
 
@@ -20,11 +21,13 @@
   let section: Section = $state("exclusions");
   let general: GeneralStatus | null = $state(null);
   let startupApps: StartupApp[] = $state([]);
+  let shell: ShellSettings | null = $state(null);
 
   onMount(() => {
     void exclusionsStore.refresh();
     generalApi.status().then((s) => (general = s)).catch(() => {});
     appsApi.startupList().then((l) => (startupApps = l)).catch(() => {});
+    shellApi.get().then((s) => (shell = s)).catch(() => {});
   });
 
   $effect(() => {
@@ -56,6 +59,8 @@
       {startupApps}
       onStartupSave={appsApi.startupSave}
       onAutostart={async (enabled) => (general = await generalApi.setAutostart(enabled))}
+      {shell}
+      onShell={shellApi.set}
       onQuit={generalApi.quit}
       onRestart={(manage, bar) => generalApi.restart(manage, bar)}
     />

@@ -468,9 +468,9 @@ fn el_cristal_copia_el_fondo_de_la_barra_y_lo_de_detras_del_panel() {
     backdrop::remember_panel(region);
     eprintln!("panel: copia en {:?}", t.elapsed());
     let t = Instant::now();
-    let img = backdrop::panel_image(60.0, scale).expect("el panel debe poder copiar lo que hay detrás");
+    let img = backdrop::panel_image(60.0, scale, false).expect("el panel debe poder copiar lo que hay detrás");
     eprintln!("panel: desenfoque en {:?} ({} bytes)", t.elapsed(), img.url.len());
     assert_eq!((img.width, img.height), (region.w, region.h));
     backdrop::forget_panel();
-    assert!(backdrop::panel_image(60.0, scale).is_none());
+    assert!(backdrop::panel_image(60.0, scale, false).is_none());
 }

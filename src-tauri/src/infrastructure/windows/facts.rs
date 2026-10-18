@@ -76,6 +76,22 @@ fn monitor_info(id: isize) -> Option<(u32, Rect, Rect)> {
     }
 }
 
+/// Zona de contenido de la ventana en coordenadas de pantalla.
+fn client_rect(hwnd: windows::Win32::Foundation::HWND) -> Option<Rect> {
+    use windows::Win32::Foundation::{POINT, RECT};
+    use windows::Win32::Graphics::Gdi::ClientToScreen;
+    use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+    unsafe {
+        let mut r = RECT::default();
+        GetClientRect(hwnd, &mut r).ok()?;
+        let mut origin = POINT { x: 0, y: 0 };
+        if !ClientToScreen(hwnd, &mut origin).as_bool() {
+            return None;
+        }
+        Some(Rect::new(origin.x, origin.y, r.right - r.left, r.bottom - r.top))
+    }
+}
+
 /// ¿La ventana cubre todo su monitor sin barra de título (juego o F11)? Y en qué monitor está (§6.4).
 pub fn fullscreen_state(id: isize) -> Option<(bool, Option<u32>)> {
     if !window_exists(id) {
@@ -89,8 +105,22 @@ pub fn fullscreen_state(id: isize) -> Option<(bool, Option<u32>)> {
         let has_caption = style & WS_CAPTION.0 == WS_CAPTION.0;
         let covers = rect.x <= bounds.x && rect.y <= bounds.y && rect.right() >= bounds.right() && rect.bottom() >= bounds.bottom();
         let on = IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool();
-        Some((covers && !has_caption && on, Some(mon_id)))
+        // También cuenta una ventana con barra de título cuya zona de contenido llena el monitor entero (la barra queda fuera
+        // de la pantalla): así lo hacen algunos reproductores y apps de la tienda.
+        let client_covers = client_rect(hwnd).is_some_and(|c| c.x <= bounds.x && c.y <= bounds.y && c.right() >= bounds.right() && c.bottom() >= bounds.bottom());
+        Some((((covers && !has_caption) || client_covers) && on, Some(mon_id)))
     }
+}
+
+/// Posición (de izquierda a derecha, como los numera Wallpaper Engine) del monitor que contiene el punto.
+pub fn monitor_index_in(bounds: &[Rect], x: i32, y: i32) -> Option<usize> {
+    bounds.iter().position(|b| x >= b.x && x < b.right() && y >= b.y && y < b.bottom())
+}
+
+/// Posición del monitor que contiene el punto de pantalla indicado.
+pub fn monitor_index_at(x: i32, y: i32) -> Option<usize> {
+    let bounds: Vec<Rect> = list_monitors().into_iter().map(|m| m.bounds).collect();
+    monitor_index_in(&bounds, x, y)
 }
 
 /// Área útil del monitor principal (escritorio como referencia).
@@ -270,5 +300,20 @@ pub fn highlight_target() -> Option<Rect> {
         }
         let r = visible_frame(id).or_else(|| window_rect(id))?;
         (r.w > 40 && r.h > 40).then_some(r)
+    }
+}
+
+#[cfg(test)]
+mod monitor_tests {
+    use super::*;
+
+    #[test]
+    fn el_monitor_de_un_punto_se_busca_por_sus_limites() {
+        let bounds = [Rect::new(0, 0, 1920, 1080), Rect::new(1920, 0, 2560, 1440)];
+        assert_eq!(monitor_index_in(&bounds, 10, 10), Some(0));
+        assert_eq!(monitor_index_in(&bounds, 1919, 1079), Some(0));
+        assert_eq!(monitor_index_in(&bounds, 1920, 0), Some(1), "el borde derecho ya es del siguiente");
+        assert_eq!(monitor_index_in(&bounds, 5000, 5), None);
+        assert_eq!(monitor_index_in(&[], 0, 0), None);
     }
 }

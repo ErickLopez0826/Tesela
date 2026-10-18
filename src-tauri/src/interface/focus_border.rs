@@ -5,7 +5,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER};
 
@@ -74,6 +74,7 @@ pub fn start(app: &AppHandle) {
     let _ = std::thread::Builder::new().name("wm-focus-border".into()).spawn(move || {
         let mut window: Option<tauri::WebviewWindow> = None;
         let mut last: Option<Rect> = None;
+        let mut monitor: Option<usize> = None;
         loop {
             std::thread::sleep(Duration::from_millis(60));
             let target = if ENABLED.load(Ordering::SeqCst) { facts::highlight_target() } else { None };
@@ -97,6 +98,12 @@ pub fn start(app: &AppHandle) {
                         let _ = w.show();
                     }
                     last = Some(r);
+                    // Si pasó a otro monitor, su vista toma ya el color del fondo de ese monitor (sin esperar al sondeo).
+                    let now = facts::monitor_index_at(r.x + r.w / 2, r.y + r.h / 2);
+                    if now != monitor {
+                        monitor = now;
+                        let _ = w.emit("wm-border-monitor", now);
+                    }
                 }
                 _ => {}
             }

@@ -235,6 +235,20 @@ impl Desktop {
         out
     }
 
+    /// Todas las ventanas gestionadas de cada workspace (también las minimizadas), para la barra de tareas:
+    /// `(ventana, workspace 0..8, minimizada)`, por workspace y en el orden en que están en pantalla.
+    pub fn taskbar_windows(&self) -> Vec<(WindowId, usize, bool)> {
+        let mut out = Vec::new();
+        for ws in 0..WORKSPACE_COUNT {
+            out.extend(self.windows_in(ws).into_iter().map(|id| (id, ws, false)));
+            let mut minimized: Vec<WindowId> =
+                self.windows.iter().filter(|(_, e)| e.workspace == Some(ws) && e.minimized).map(|(id, _)| *id).collect();
+            minimized.sort();
+            out.extend(minimized.into_iter().map(|id| (id, ws, true)));
+        }
+        out
+    }
+
     pub fn all_windows(&self) -> Vec<WindowId> {
         let mut v: Vec<_> = self.windows.keys().copied().collect();
         v.sort();
@@ -655,6 +669,11 @@ impl Desktop {
     pub fn move_focused_to_workspace(&mut self, ws: usize, follow: bool) -> Vec<Effect> {
         let Some(id) = self.focused() else { return vec![] };
         self.move_window_to_workspace(id, ws, follow)
+    }
+
+    /// Lleva una ventana a otro workspace sin cambiar de workspace ni enfocar nada (aplicaciones de arranque ya abiertas).
+    pub fn move_window_quietly(&mut self, id: WindowId, ws: usize) -> Vec<Effect> {
+        self.move_window_inner(id, ws, false, false)
     }
 
     fn move_window_to_workspace(&mut self, id: WindowId, ws: usize, follow: bool) -> Vec<Effect> {

@@ -59,6 +59,13 @@ pub fn exe_of_path(path: &str) -> String {
     normalize_exe(file)
 }
 
+/// Ejecutable al que pertenece la ventana de una aplicación: los accesos directos de las «apps» de Chrome, Edge o Brave
+/// apuntan a `chrome_proxy.exe`, pero su ventana es de `chrome.exe`.
+pub fn window_exe(exe: &str) -> String {
+    let exe = normalize_exe(exe);
+    exe.strip_suffix("_proxy").map(str::to_string).filter(|e| !e.is_empty()).unwrap_or(exe)
+}
+
 /// Valida y limpia la lista que llega de la interfaz: sin vacíos ni repetidos (misma ruta), workspace entre 1 y 9.
 pub fn validate(list: Vec<StartupApp>) -> Result<Vec<StartupApp>, String> {
     let mut out: Vec<StartupApp> = Vec::new();
@@ -98,6 +105,15 @@ mod tests {
         assert_eq!(exe_of_path("\"C:/x/Code.EXE\""), "code");
         assert_eq!(exe_of_path("notepad"), "notepad");
         assert_eq!(exe_of_path(""), "");
+    }
+
+    #[test]
+    fn las_apps_de_chrome_y_edge_se_reconocen_por_el_navegador() {
+        assert_eq!(window_exe("chrome_proxy"), "chrome");
+        assert_eq!(window_exe("MSEdge_Proxy.exe"), "msedge");
+        assert_eq!(window_exe("spotify"), "spotify");
+        assert_eq!(window_exe("_proxy"), "_proxy");
+        assert_eq!(window_exe(""), "");
     }
 
     #[test]

@@ -554,6 +554,7 @@ pub mod fakes {
             focused: focused.map(|t| FocusedSnapshot { exe: "app.exe".into(), title: t.into() }),
             paused: false,
             mode: None,
+            windows: vec![],
         }
     }
 

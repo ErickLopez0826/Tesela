@@ -75,7 +75,8 @@
   button { font: inherit; color: inherit; background: transparent; border: 0; cursor: pointer; }
   .ws { position: relative; z-index: 1; min-width: 24px; height: 24px; opacity: 0.45; }
   .ws.busy { opacity: 0.8; }
-  .ws { border-radius: 50%; transition: background 0.4s ease, opacity 0.3s, color 0.3s; }
+  /* Misma forma que la pastilla del workspace actual (cápsula): al pasar el cursor el resalte no es un óvalo. */
+  .ws { border-radius: 999px; transition: background 0.4s ease, opacity 0.3s, color 0.3s; }
   .ws.visible { opacity: 1; background: rgba(255, 255, 255, 0.14); }
   .ws.active { background: transparent; color: var(--ws-on, #0a0a0b); font-weight: 700; }
   .ws.enter { animation: drop 0.8s cubic-bezier(.3, 1.3, .4, 1) both; }

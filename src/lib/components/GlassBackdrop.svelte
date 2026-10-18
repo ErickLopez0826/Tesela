@@ -2,9 +2,14 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
+  import { imageLuma } from "../stores/tone";
   import { onWallpaperChanged } from "../stores/theme";
 
-  let { kind, blur, tick = 0 }: { kind: "bar" | "panel"; blur: number; tick?: number } = $props();
+  /** `onLuma`: avisa de la luminosidad (0 a 1) de lo que hay detrás, para elegir un texto que se lea (aunque no haya desenfoque). */
+  let { kind, blur, tick = 0, onLuma }: { kind: "bar" | "panel"; blur: number; tick?: number; onLuma?: (luma: number | null) => void } = $props();
+
+  /** Desenfoque con el que se pide la copia cuando solo hace falta para medir su luminosidad. */
+  const TONE_BLUR = 20;
 
   interface Glass {
     url: string;
@@ -22,15 +27,20 @@
 
   async function load(refresh: boolean) {
     const mine = ++seq;
-    if (blur <= 0) {
+    const visible = blur > 0;
+    if (!visible && !onLuma) {
       image = null;
       return;
     }
     try {
-      const glass = await invoke<Glass | null>("glass_image", { kind, blur, refresh });
-      if (mine === seq) image = glass;
+      const glass = await invoke<Glass | null>("glass_image", { kind, blur: visible ? blur : TONE_BLUR, refresh });
+      if (mine !== seq) return;
+      image = visible ? glass : null;
+      if (onLuma) void imageLuma(glass?.url).then((l) => mine === seq && onLuma(l));
     } catch {
-      if (mine === seq) image = null;
+      if (mine !== seq) return;
+      image = null;
+      onLuma?.(null);
     }
   }
 
@@ -44,12 +54,12 @@
   });
 
   onMount(() => {
-    if (kind !== "bar") return;
     const stopWallpaper = onWallpaperChanged(() => void load(true));
-    const every = setInterval(() => document.visibilityState !== "hidden" && void load(true), REFRESH_EVERY_MS);
+    // El panel abierto también sigue al fondo; la barra además lo vuelve a copiar cada tanto por si cambió por su cuenta.
+    const every = kind === "bar" ? setInterval(() => document.visibilityState !== "hidden" && void load(true), REFRESH_EVERY_MS) : undefined;
     return () => {
       stopWallpaper();
-      clearInterval(every);
+      if (every) clearInterval(every);
     };
   });
 

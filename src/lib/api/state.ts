@@ -17,6 +17,18 @@ export interface WorkspaceSnapshot {
   window_count: number;
 }
 
+/** Una ventana gestionada, para la barra de tareas. */
+export interface WindowSnapshot {
+  id: number;
+  /** Workspace (1 a 9) donde está. */
+  workspace: number;
+  title: string;
+  /** Ejecutable sin `.exe`, en minúsculas. */
+  exe: string;
+  focused: boolean;
+  minimized: boolean;
+}
+
 export interface FocusedSnapshot {
   exe: string;
   title: string;
@@ -28,6 +40,7 @@ export interface StateSnapshot {
   focused: FocusedSnapshot | null;
   paused: boolean;
   mode: string | null;
+  windows?: WindowSnapshot[];
 }
 
 export interface SystemStats {

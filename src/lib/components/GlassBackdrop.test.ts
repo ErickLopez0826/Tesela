@@ -85,6 +85,15 @@ describe("GlassBackdrop", () => {
     expect(imageCalls().length).toBe(calls + 1);
   });
 
+  it("el panel abierto vuelve a copiar el fondo cuando cambia el fondo de pantalla", async () => {
+    render(GlassBackdrop, { kind: "panel", blur: 40 });
+    await flush();
+    invoke.mockClear();
+    window.dispatchEvent(new Event("wm-wallpaper-changed"));
+    await flush();
+    expect(imageCalls()).toEqual([["glass_image", { kind: "panel", blur: 40, refresh: true }]]);
+  });
+
   it("la barra vuelve a copiar el fondo cuando cambia el fondo de pantalla", async () => {
     render(GlassBackdrop, { kind: "bar", blur: 40 });
     await flush();

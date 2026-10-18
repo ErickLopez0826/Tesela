@@ -9,7 +9,7 @@ use crate::domain::manageable::{is_manageable, Scope};
 use crate::domain::rules::{apply_rules, normalize_exe, ExclusionList, WindowRule};
 use std::time::{Duration, Instant};
 use crate::domain::shortcuts::Keymap;
-use crate::domain::snapshot::{FocusedSnapshot, StateSnapshot};
+use crate::domain::snapshot::{FocusedSnapshot, StateSnapshot, WindowSnapshot};
 
 /// Nombre del modo de teclado que activa `EnterResizeMode`.
 const RESIZE_MODE: &str = "resize";
@@ -46,6 +46,8 @@ pub struct StartupExpect {
     pub exe: String,
     pub workspace: usize,
     pub ttl: Duration,
+    /// También llevar a `workspace` las ventanas de esa aplicación que ya estaban abiertas.
+    pub move_existing: bool,
 }
 
 /// Lee y valida la configuración actual (archivo en producción).
@@ -173,7 +175,11 @@ impl<P: WindowPlatform> Controller<P> {
         let now = Instant::now();
         self.startup.retain(|(_, _, until)| *until > now);
         let exe = normalize_exe(exe);
-        self.startup.iter().find(|(e, _, _)| *e == exe).map(|(_, ws, _)| *ws)
+        let found = self.startup.iter().find(|(e, _, _)| *e == exe).map(|(_, ws, _)| *ws);
+        if let Some(ws) = found {
+            eprintln!("[wm] arranque: «{exe}» → workspace {}", ws + 1);
+        }
+        found
     }
 
     /// Publica el estado para la interfaz solo cuando cambió.
@@ -184,7 +190,24 @@ impl<P: WindowPlatform> Controller<P> {
             .focused_window()
             .and_then(|id| self.platform.facts(id))
             .map(|f| FocusedSnapshot { exe: f.exe, title: f.title });
-        let state = StateSnapshot { monitors, workspaces, focused, paused: self.paused, mode: self.mode.clone() };
+        let focused_id = self.desk.focused_window();
+        let windows = self
+            .desk
+            .taskbar_windows()
+            .into_iter()
+            .filter_map(|(id, ws, minimized)| {
+                let f = self.platform.facts(id)?;
+                Some(WindowSnapshot {
+                    id,
+                    workspace: ws + 1,
+                    title: f.title,
+                    exe: normalize_exe(&f.exe),
+                    focused: Some(id) == focused_id && ws == self.desk.active_workspace(),
+                    minimized,
+                })
+            })
+            .collect();
+        let state = StateSnapshot { monitors, workspaces, focused, paused: self.paused, mode: self.mode.clone(), windows };
         if self.last_state.as_ref() != Some(&state) {
             self.platform.publish_state(&state);
             self.last_state = Some(state);
@@ -390,8 +413,22 @@ impl<P: WindowPlatform> Controller<P> {
             Message::ExpectStartup(list) => {
                 let now = Instant::now();
                 for e in list {
+                    let ws = e.workspace.min(8);
+                    if e.move_existing {
+                        let ids: Vec<WindowId> = self
+                            .desk
+                            .tracked_windows()
+                            .into_iter()
+                            .map(|(id, _)| id)
+                            .filter(|&id| !self.desk.is_excluded(id) && self.platform.facts(id).is_some_and(|f| normalize_exe(&f.exe) == e.exe))
+                            .collect();
+                        for id in ids {
+                            let fx = self.desk.move_window_quietly(id, ws);
+                            self.run(fx);
+                        }
+                    }
                     self.startup.retain(|(exe, _, _)| *exe != e.exe);
-                    self.startup.push((e.exe, e.workspace.min(8), now + e.ttl));
+                    self.startup.push((e.exe, ws, now + e.ttl));
                 }
             }
             Message::Opened(id) => self.try_add(id),
@@ -427,6 +464,13 @@ impl<P: WindowPlatform> Controller<P> {
                 self.reapply_exclusions();
             }
             Message::Tick => {
+                // Mientras se espera la ventana de una aplicación de arranque se recogen también las que nacieron sin
+                // título o aún sin mostrar (Electron): su evento de «mostrada» ya pasó y no se volvería a evaluar.
+                let now = Instant::now();
+                self.startup.retain(|(_, _, until)| *until > now);
+                if !self.startup.is_empty() {
+                    self.adopt_existing();
+                }
                 self.check_monitors();
                 self.check_fullscreen();
                 self.drop_ghost_windows();
@@ -1191,7 +1235,7 @@ mod tests {
     // ---------- Aplicaciones de arranque ----------
 
     fn expect(exe: &str, workspace: usize, ttl: Duration) -> Message {
-        Message::ExpectStartup(vec![StartupExpect { exe: exe.into(), workspace, ttl }])
+        Message::ExpectStartup(vec![StartupExpect { exe: exe.into(), workspace, ttl, move_existing: false }])
     }
 
     #[test]
@@ -1230,8 +1274,8 @@ mod tests {
         excl.add("spotify", None);
         let mut c = Controller::with_all(FakePlatform::new(), Scope::TitlePrefix("WMTEST".into()), Settings::default(), Keymap::default(), excl, rules);
         c.handle(Message::ExpectStartup(vec![
-            StartupExpect { exe: "code".into(), workspace: 7, ttl: Duration::from_secs(60) },
-            StartupExpect { exe: "spotify".into(), workspace: 5, ttl: Duration::from_secs(60) },
+            StartupExpect { exe: "code".into(), workspace: 7, ttl: Duration::from_secs(60), move_existing: false },
+            StartupExpect { exe: "spotify".into(), workspace: 5, ttl: Duration::from_secs(60), move_existing: false },
         ]));
         with_exe(c.platform_mut(), 1, "code.exe", "WMTEST code");
         with_exe(c.platform_mut(), 2, "spotify.exe", "WMTEST musica");
@@ -1241,7 +1285,61 @@ mod tests {
         assert!(!c.platform().windows[&2].touched, "una app excluida no se mueve aunque sea de arranque");
     }
 
+    #[test]
+    fn una_ventana_que_nace_sin_titulo_se_recoge_en_el_siguiente_tick() {
+        let mut c = Controller::new(FakePlatform::new(), Scope::TitlePrefix("WMTEST".into()));
+        c.handle(expect("discord", 4, Duration::from_secs(60)));
+        with_exe(c.platform_mut(), 1, "Discord.exe", "");
+        c.handle(Message::Opened(1));
+        assert_eq!(c.desktop().workspace_of(1), None, "sin título aún no se gestiona");
+        c.platform_mut().windows.get_mut(&1).unwrap().facts.title = "WMTEST Discord".into();
+        c.handle(Message::Tick);
+        assert_eq!(c.desktop().workspace_of(1), Some(4));
+        assert!(c.platform().windows[&1].hidden);
+    }
+
+    #[test]
+    fn sin_esperas_el_tick_no_adopta_ventanas_nuevas() {
+        let mut c = Controller::new(FakePlatform::new(), Scope::TitlePrefix("WMTEST".into()));
+        with_exe(c.platform_mut(), 1, "otro.exe", "");
+        c.handle(Message::Opened(1));
+        c.platform_mut().windows.get_mut(&1).unwrap().facts.title = "WMTEST otro".into();
+        c.handle(Message::Tick);
+        assert_eq!(c.desktop().workspace_of(1), None);
+    }
+
+    #[test]
+    fn una_app_ya_abierta_se_lleva_a_su_workspace_sin_cambiar_el_activo() {
+        let mut c = Controller::new(FakePlatform::new(), Scope::TitlePrefix("WMTEST".into()));
+        with_exe(c.platform_mut(), 1, "Spotify.exe", "WMTEST musica");
+        with_exe(c.platform_mut(), 2, "otro.exe", "WMTEST otro");
+        c.handle(Message::Opened(1));
+        c.handle(Message::Opened(2));
+        assert_eq!(c.desktop().workspace_of(1), Some(0));
+        c.handle(Message::ExpectStartup(vec![StartupExpect { exe: "spotify".into(), workspace: 4, ttl: Duration::from_secs(60), move_existing: true }]));
+        assert_eq!(c.desktop().workspace_of(1), Some(4));
+        assert_eq!(c.desktop().workspace_of(2), Some(0));
+        assert!(c.platform().windows[&1].hidden);
+        assert_eq!(c.desktop().active_workspace(), 0, "no se cambia de workspace");
+    }
+
     // ---------- Fase 5: estado para la barra y el panel ----------
+
+    #[test]
+    fn el_estado_trae_las_ventanas_por_workspace_para_la_barra_de_tareas() {
+        let mut c = Controller::new(FakePlatform::new(), Scope::TitlePrefix("WMTEST".into()));
+        with_exe(c.platform_mut(), 1, "Code.exe", "WMTEST uno");
+        with_exe(c.platform_mut(), 2, "Spotify.exe", "WMTEST dos");
+        c.handle(expect("spotify", 2, Duration::from_secs(60)));
+        c.handle(Message::Opened(1));
+        c.handle(Message::Opened(2));
+        c.handle(Message::Minimized(1));
+        let s = c.platform().states.last().unwrap().clone();
+        let mut w: Vec<_> = s.windows.iter().map(|w| (w.id, w.workspace, w.exe.as_str(), w.minimized)).collect();
+        w.sort();
+        assert_eq!(w, [(1, 1, "code", true), (2, 3, "spotify", false)]);
+        assert!(s.windows.iter().all(|w| w.title.starts_with("WMTEST")));
+    }
 
     #[test]
     fn publica_el_estado_inicial_y_solo_cuando_cambia() {

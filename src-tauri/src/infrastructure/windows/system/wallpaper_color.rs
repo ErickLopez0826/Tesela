@@ -102,15 +102,16 @@ fn thumbnail(path: &str) -> Result<Vec<u8>, String> {
     }
 }
 
-/// Último resultado: la interfaz lo pide desde varias ventanas cada pocos segundos y la imagen casi nunca cambia.
-static LAST: std::sync::Mutex<Option<(String, Option<std::time::SystemTime>, String)>> = std::sync::Mutex::new(None);
+/// Resultados anteriores por imagen: la interfaz los pide desde varias ventanas (una por monitor) cada pocos segundos y
+/// las imágenes casi nunca cambian.
+static LAST: std::sync::Mutex<Option<std::collections::HashMap<String, (Option<std::time::SystemTime>, String)>>> = std::sync::Mutex::new(None);
 
 /// Color dominante (`#rrggbb`) de la imagen indicada. Si la imagen es la misma (misma ruta y misma fecha de
 /// modificación) que en la última llamada, se devuelve el resultado guardado sin decodificarla de nuevo.
 pub fn color_of(path: &str) -> Result<String, String> {
     let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok();
-    if let Some((p, m, color)) = LAST.lock().unwrap().as_ref() {
-        if p == path && *m == modified && modified.is_some() {
+    if let Some((m, color)) = LAST.lock().unwrap().as_ref().and_then(|cache| cache.get(path)) {
+        if *m == modified && modified.is_some() {
             return Ok(color.clone());
         }
     }
@@ -123,7 +124,7 @@ pub fn color_of(path: &str) -> Result<String, String> {
         .join()
         .map_err(|_| "el hilo del color falló".to_string())??;
     let color = dominant(&pixels).map(hex).ok_or_else(|| "imagen vacía".to_string())?;
-    *LAST.lock().unwrap() = Some((path.to_string(), modified, color.clone()));
+    LAST.lock().unwrap().get_or_insert_with(Default::default).insert(path.to_string(), (modified, color.clone()));
     Ok(color)
 }
 

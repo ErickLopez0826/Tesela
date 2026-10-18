@@ -214,7 +214,7 @@ pub fn close_panel(app: tauri::AppHandle) {
 
 /// Imagen de lo que hay detrás de la barra o del panel, ya desenfocada con la intensidad (0 a 100) pedida: la vista la
 /// dibuja bajo su tinte. `None` si no se pudo copiar (entonces se queda solo el tinte). Con `refresh` se vuelve a copiar
-/// el fondo de pantalla de la barra (cambió el fondo).
+/// el fondo de pantalla de la barra o del panel (cambió el fondo).
 #[cfg(windows)]
 #[tauri::command]
 pub async fn glass_image(
@@ -234,9 +234,58 @@ pub async fn glass_image(
             let label = window.label().to_string();
             blocking(move || Ok(backdrop::bar_image(&label, rect, blur, scale, refresh))).await
         }
-        "panel" => blocking(move || Ok(backdrop::panel_image(blur, scale))).await,
+        "panel" => blocking(move || Ok(backdrop::panel_image(blur, scale, refresh))).await,
         other => Err(format!("fondo desconocido: {other}")),
     }
+}
+
+// ----- Barra de tareas propia y tecla Windows -----
+
+/// Lo que Tesela reemplaza de Windows (barra de tareas y tecla Windows).
+#[cfg(windows)]
+#[tauri::command]
+pub fn shell_get() -> crate::domain::shell::ShellSettings {
+    crate::interface::shell::get()
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub fn shell_set(app: tauri::AppHandle, settings: crate::domain::shell::ShellSettings) -> Result<crate::domain::shell::ShellSettings, String> {
+    crate::interface::shell::set(&app, settings)
+}
+
+/// La vista de la barra de tareas avisa del ancho (lógico) que necesita su contenido.
+#[cfg(windows)]
+#[tauri::command]
+pub fn taskbar_resize(app: tauri::AppHandle, window: tauri::WebviewWindow, width: f64) {
+    if let Some(monitor) = crate::interface::taskbar::monitor_of_label(window.label()) {
+        crate::interface::taskbar::resize(&app, monitor, width);
+    }
+}
+
+/// La barra de tareas se cierra a sí misma (al tocar una app).
+#[cfg(windows)]
+#[tauri::command]
+pub fn taskbar_hide(app: tauri::AppHandle, window: tauri::WebviewWindow) {
+    if let Some(monitor) = crate::interface::taskbar::monitor_of_label(window.label()) {
+        crate::interface::taskbar::hide(&app, monitor);
+    }
+}
+
+/// Enfoca una ventana desde la barra de tareas (cambia de workspace y la restaura si hace falta).
+#[cfg(windows)]
+#[tauri::command]
+pub fn focus_window(state: State<'_, AppState>, handle: isize) {
+    if let Some(rt) = state.manager.lock().unwrap().as_ref() {
+        rt.send(crate::application::controller::Message::FocusWindow(handle));
+    }
+}
+
+/// Icono (PNG en una URL de datos) de la aplicación de una ventana. `key` agrupa las ventanas con el mismo icono.
+#[cfg(windows)]
+#[tauri::command]
+pub async fn app_icon(handle: isize, key: String) -> Result<Option<String>, String> {
+    blocking(move || Ok(crate::infrastructure::windows::icons::app_icon_url(handle, &key))).await
 }
 
 // ----- Módulos de sistema y de acción (Fase 6) -----
@@ -544,15 +593,22 @@ fn play_wallpaper_transition(s: &Arc<SystemServices>, id: &str, monitor: Option<
     fade::play(overlays, cursor, applied).map(|_| ())
 }
 
-/// Color dominante (`#rrggbb`) del fondo de pantalla actual (el de Wallpaper Engine si lo hay); `None` si no se puede leer.
+/// Color dominante (`#rrggbb`) del fondo de pantalla del monitor donde está la ventana que lo pide (el de Wallpaper Engine si
+/// lo hay); `None` si no se puede leer. Cada barra y cada panel toma así el color del fondo de su propio monitor.
 #[tauri::command]
-pub async fn wallpaper_color(state: State<'_, AppState>) -> Result<Option<String>, String> {
+pub async fn wallpaper_color(window: tauri::WebviewWindow, state: State<'_, AppState>) -> Result<Option<String>, String> {
     let s = state.services.clone();
+    let center = match (window.outer_position(), window.outer_size()) {
+        (Ok(p), Ok(sz)) => Some((p.x + sz.width as i32 / 2, p.y + sz.height as i32 / 2)),
+        _ => None,
+    };
     blocking(move || {
         use crate::infrastructure::windows::system::wallpaper_color::color_of;
+        // Wallpaper Engine numera los monitores de izquierda a derecha, igual que la app.
+        let monitor = center.and_then(|(cx, cy)| crate::infrastructure::windows::facts::monitor_index_at(cx, cy)).unwrap_or(0) as u32;
         // Con Wallpaper Engine el fondo de Windows es una copia casi negra: el color sale de la previsualización del
-        // fondo que Wallpaper Engine tiene puesto de verdad.
-        if let Some(preview) = s.engine.lock().map_err(lock_err)?.current_preview() {
+        // fondo que Wallpaper Engine tiene puesto de verdad en ese monitor.
+        if let Some(preview) = s.engine.lock().map_err(lock_err)?.current_preview_for(monitor) {
             if let Ok(color) = color_of(&preview) {
                 return Ok(Some(color));
             }

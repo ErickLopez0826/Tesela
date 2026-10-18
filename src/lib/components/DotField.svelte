@@ -1,10 +1,23 @@
 <!-- Fondo monocromo de puntos: los que quedan bajo el cursor se iluminan en un área pequeña y la luz lo sigue con
-     suavidad. Al pulsar un botón, una ola de luz recorre los puntos desde ese punto hacia fuera. Decorativo. -->
+     suavidad. Al pulsar un botón, una ola de luz recorre los puntos desde ese punto hacia fuera, y cuando cambia el color de Tesela
+     los puntos nuevos avanzan como una ola de agua sobre los anteriores. Decorativo. -->
 <script lang="ts">
+  import { onMount } from "svelte";
+
   // `fixed`: cubre la ventana entera; si es falso, rellena el contenedor posicionado que lo contiene.
   let { fixed = true }: { fixed?: boolean } = $props();
 
+  const RECOLOR_MS = 1500;
+  const readDot = () => getComputedStyle(document.documentElement).getPropertyValue("--dot").trim() || "255, 255, 255";
+  const reduced = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
   let field: HTMLElement | undefined = $state();
+  /** Color («r, g, b») con el que se dibujan los puntos ahora. */
+  let shown = $state(readDot());
+  /** Color nuevo que avanza en forma de ola sobre el anterior mientras dura el cambio. */
+  let incoming: string | null = $state(null);
+  let recolor: Animation | undefined;
+  let lastDown = { x: 0, y: 0, at: 0 };
 
   function move(e: PointerEvent) {
     if (!field) return;
@@ -18,33 +31,92 @@
     field?.style.setProperty("--lit", "0");
   }
 
-  /** Ola: un anillo de puntos encendidos que se expande desde el botón pulsado y se apaga al alejarse. */
-  function wave(e: PointerEvent) {
-    if (!field || !(e.target instanceof Element) || !e.target.closest("button, .fluid")) return;
-    if (matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  /** Distancia del punto a la esquina más lejana: hasta ahí tiene que crecer una ola para cubrirlo todo. */
+  function reachFrom(x: number, y: number, w: number, h: number) {
+    return Math.hypot(Math.max(x, w - x), Math.max(y, h - y)) + 90;
+  }
+
+  /** Un anillo de puntos encendidos que se expande desde (x, y) y se apaga al alejarse. */
+  function ring(x: number, y: number, duration: number, color?: string) {
+    if (!field) return;
     const r = field.getBoundingClientRect();
     const el = document.createElement("div");
     el.className = "dots ripple";
-    el.style.setProperty("--wx", `${e.clientX - r.left}px`);
-    el.style.setProperty("--wy", `${e.clientY - r.top}px`);
+    el.style.setProperty("--wx", `${x}px`);
+    el.style.setProperty("--wy", `${y}px`);
+    if (color) el.style.setProperty("--dot", color);
     field.appendChild(el);
-    const reach = Math.hypot(Math.max(e.clientX - r.left, r.width - (e.clientX - r.left)), Math.max(e.clientY - r.top, r.height - (e.clientY - r.top))) + 90;
     const anim = el.animate(
       [
         { "--wr": "0px", opacity: 1 },
         { opacity: 1, offset: 0.55 },
-        { "--wr": `${reach}px`, opacity: 0 },
+        { "--wr": `${reachFrom(x, y, r.width, r.height)}px`, opacity: 0 },
       ],
-      { duration: 1100, easing: "cubic-bezier(.25,.6,.3,1)" },
+      { duration, easing: "cubic-bezier(.25,.6,.3,1)" },
     );
     anim.onfinish = anim.oncancel = () => el.remove();
   }
+
+  /** Al pulsar un botón, una ola de luz recorre los puntos desde ese punto hacia fuera. */
+  function wave(e: PointerEvent) {
+    if (!field) return;
+    const r = field.getBoundingClientRect();
+    lastDown = { x: e.clientX - r.left, y: e.clientY - r.top, at: Date.now() };
+    if (!(e.target instanceof Element) || !e.target.closest("button, .fluid") || reduced()) return;
+    ring(lastDown.x, lastDown.y, 1100);
+  }
+
+  function settle() {
+    recolor?.cancel();
+    recolor = undefined;
+    if (incoming) shown = incoming;
+    incoming = null;
+  }
+
+  /**
+   * El color de Tesela cambió: los puntos nuevos avanzan como una ola de agua sobre los anteriores. Con un botón nace donde
+   * se pulsó; con un cambio de fondo de pantalla, en el centro.
+   */
+  function recolored(e: Event) {
+    if (!field) return;
+    const next = readDot();
+    if (next === (incoming ?? shown)) return;
+    settle();
+    if (next === shown) return;
+    if (reduced() || typeof field.animate !== "function") {
+      shown = next;
+      return;
+    }
+    const r = field.getBoundingClientRect();
+    const byButton = (e as CustomEvent).detail?.source !== "wallpaper" && Date.now() - lastDown.at < 1500;
+    const [x, y] = byButton ? [lastDown.x, lastDown.y] : [r.width / 2, r.height / 2];
+    field.style.setProperty("--rx", `${x}px`);
+    field.style.setProperty("--ry", `${y}px`);
+    incoming = next;
+    const reach = reachFrom(x, y, r.width, r.height);
+    ring(x, y, RECOLOR_MS, next);
+    recolor = field.animate([{ "--rr": "0px" }, { "--rr": `${reach}px` }], { duration: RECOLOR_MS, easing: "cubic-bezier(.25,.6,.3,1)" });
+    recolor.onfinish = () => {
+      if (incoming) shown = incoming;
+      incoming = null;
+      recolor = undefined;
+    };
+  }
+
+  onMount(() => {
+    window.addEventListener("wm-theme-applied", recolored);
+    return () => {
+      window.removeEventListener("wm-theme-applied", recolored);
+      recolor?.cancel();
+    };
+  });
 </script>
 
 <svelte:window onpointermove={move} onpointerdowncapture={wave} onblur={leave} onmouseout={(e) => !e.relatedTarget && leave()} />
 
-<div class="field" class:contained={!fixed} bind:this={field} aria-hidden="true">
-  <div class="dots base"></div>
+<div class="field" class:contained={!fixed} class:recoloring={incoming !== null} style:--dot={shown} bind:this={field} aria-hidden="true">
+  <div class="dots base old"></div>
+  {#if incoming}<div class="dots base new" style:--dot={incoming}></div>{/if}
   <div class="dots lit"></div>
 </div>
 
@@ -55,6 +127,7 @@
   @property --my { syntax: "<length>"; inherits: true; initial-value: -200px; }
   @property --lit { syntax: "<number>"; inherits: true; initial-value: 0; }
   @property --wr { syntax: "<length>"; inherits: true; initial-value: 0px; }
+  @property --rr { syntax: "<length>"; inherits: true; initial-value: 0px; }
 
   .field {
     position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none;
@@ -70,6 +143,15 @@
     opacity: var(--lit);
     -webkit-mask-image: radial-gradient(circle 76px at var(--mx) var(--my), #000 0%, rgba(0, 0, 0, 0.45) 45%, transparent 100%);
     mask-image: radial-gradient(circle 76px at var(--mx) var(--my), #000 0%, rgba(0, 0, 0, 0.45) 45%, transparent 100%);
+  }
+  /* Cambio de color: los puntos viejos quedan fuera del círculo que crece (--rr) y los nuevos dentro, con un borde suave. */
+  .field.recoloring :global(.old) {
+    -webkit-mask-image: radial-gradient(circle at var(--rx) var(--ry), transparent calc(var(--rr) - 30px), #000 var(--rr));
+    mask-image: radial-gradient(circle at var(--rx) var(--ry), transparent calc(var(--rr) - 30px), #000 var(--rr));
+  }
+  .field :global(.new) {
+    -webkit-mask-image: radial-gradient(circle at var(--rx) var(--ry), #000 calc(var(--rr) - 30px), transparent var(--rr));
+    mask-image: radial-gradient(circle at var(--rx) var(--ry), #000 calc(var(--rr) - 30px), transparent var(--rr));
   }
   /* El anillo de la ola: un borde suave de unos 90 px de ancho que crece con --wr. */
   .field :global(.ripple) {

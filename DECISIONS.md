@@ -201,4 +201,59 @@ Las exclusiones y las ventanas abiertas se paginan de 10 en 10 (`Pager`). El cam
 
 
 ## D-87 — Política de versiones
-`MAYOR.MENOR.PARCHE`. **Mayor**: cambio completo de la aplicación; solo sube cuando Erick lo indica. **Menor**: cambios significativos (un módulo nuevo o la modificación de gran impacto de uno). **Parche**: arreglos de errores, rendimiento o cambios pequeños. Versión actual: **1.1.0** (se mantiene en `package.json`, `src-tauri/Cargo.toml` y `src-tauri/tauri.conf.json`).
+`MAYOR.MENOR.PARCHE`. **Mayor**: cambio completo de la aplicación; solo sube cuando Erick lo indica. **Menor**: cambios significativos (un módulo nuevo o la modificación de gran impacto de uno). **Parche**: arreglos de errores, rendimiento o cambios pequeños. Versión actual: **1.2.4** (se mantiene en `package.json`, `src-tauri/Cargo.toml` y `src-tauri/tauri.conf.json`).
+
+## D-88 — Aplicaciones de arranque: por qué no iban a su workspace
+Tres causas: (a) el acceso directo de una app de Chrome apunta a `chrome_proxy.exe` pero su ventana es de `chrome.exe` (`window_exe` quita el sufijo `_proxy`; la app se lanza siempre aunque Chrome ya esté abierto); (b) las apps Electron crean la ventana sin título y el evento de «mostrada» ya pasó cuando lo ponen, así que `try_add` la descartaba para siempre (mientras haya esperas vigentes, el `Tick` vuelve a recoger las ventanas aún no seguidas); (c) las apps que ya estaban abiertas no se movían (`move_existing` las lleva a su workspace sin cambiar de workspace activo).
+
+## D-89 — Borde: color por monitor al instante y con transición
+La ventana del borde avisa (`wm-border-monitor`) cuando pasa a otro monitor y su vista relee el color de ese monitor al momento (antes esperaba al sondeo de 15 s). El color viaja como tres números registrados con `@property` (`--fr/--fg/--fb`) y se transiciona 0,9 s.
+
+## D-90 — Barra de tareas propia y tecla Windows (1.2.0)
+- **Barra de tareas de Windows:** se oculta `Shell_TrayWnd`/`Shell_SecondaryTrayWnd` y se pone en «ocultar automáticamente»; un hilo la vigila. El estado original se anota en `state/taskbar-hidden`; si Tesela muere a la fuerza, el siguiente arranque (o `--recover`) la restaura. Al salir se restaura siempre.
+- **Barra propia:** una «isla» por monitor, centrada abajo, con las ventanas de cada workspace (1, 2, 3…) y su icono; su ancho sigue al contenido. La franja de abajo se reserva como AppBar (`ABE_BOTTOM`). Se esconde con la pantalla completa igual que la barra superior. Iconos: el de la ventana (`WM_GETICON`), el de su clase o el de su ejecutable, en PNG.
+- **Tecla Windows:** gancho `WH_KEYBOARD_LL`. Un toque solo (sin otra tecla) inyecta una tecla neutra (0xE8) para cancelar Inicio y abre el panel; los atajos con Windows pasan intactos. `Ctrl+Esc` se traga y abre el panel. Ctrl+Alt+Supr y Win+L no se tocan.
+- Ajustes en `shell.json` (Ajustes → General), ambos activados por defecto.
+- No se reemplaza Explorer como shell ni se lee la bandeja del sistema (no hay API pública); la bandeja sigue siendo la de Windows.
+
+## D-91 — Arreglos de 1.2.1: permisos de la barra de tareas y toque de la tecla Windows
+- La barra de tareas salía vacía (solo una píldora) porque su etiqueta `taskbar-*` no estaba en `capabilities/default.json`: sin permiso, la vista no podía leer el estado, pedir iconos ni avisar de su ancho. Una prueba comprueba que todas las etiquetas de ventana de la app estén cubiertas.
+- Segundo toque de Windows abría Inicio: dejar pasar el soltado e inyectar la tecla neutra a la vez no tiene orden garantizado. Ahora el soltado original se traga y se inyecta «neutra pulsada, neutra soltada, Windows soltada» en ese orden. (Antes, Inicio sí se abría, pero el panel recién abierto le quitaba el foco y lo cerraba, por eso solo se notaba la segunda vez.)
+
+## D-92 — 1.2.2: texto negro en el panel, texto dinámico y forma del resalte de workspace
+- El texto del panel se volvió negro porque `Border.svelte` registraba `--fg` (y `--fr`, `--fb`) con `@property` como número: una `@property` vale para todo el documento y todas las ventanas comparten la hoja, así que el `--fg: #f1f1f1` del tema dejó de ser válido. Las del borde pasan a `--ring-r/g/b` y una prueba impide que una `@property` pise una variable del tema.
+- Texto del panel dinámico: luminosidad del fondo = tinte oscuro (con su opacidad) mezclado con la luminosidad de la copia desenfocada de lo que hay detrás (`stores/tone.ts`); por encima de 0,55 el texto pasa a oscuro (`--fg`/`--muted` en `.shell` y `.panel`). La copia se pide aunque el desenfoque sea 0 (solo para medir).
+- El resalte de un workspace al pasar el cursor era un óvalo (`border-radius: 50%` en un botón de 36×24) y la pastilla del actual una cápsula: ambos son ahora cápsulas.
+
+## D-93 — 1.2.3: la barra de tareas flota y se despliega como el panel (sustituye la reserva de franja de D-90)
+- Ya no reserva espacio (sin AppBar): flota por encima de las aplicaciones y está oculta hasta que se pide.
+- Se despliega con la tecla Windows (que ahora abre o cierra a la vez el panel y la barra de tareas del monitor del cursor) o acercando el cursor, ~160 ms, al centro del borde de abajo (±150 px, 4 px de grosor). Se cierra al tocar una app, al volver a pulsar Windows o al alejar el cursor (450 ms; si se abrió con Windows y el cursor nunca llegó a estar encima, se queda hasta que se toque una app o se pulse Windows).
+- Animación: sube desde abajo al aparecer y la misma al revés al cerrarse (eventos `wm-taskbar-shown` / `wm-taskbar-closing`, como el panel; el cierre real de la ventana espera a la animación y un contador de generación cancela cierres si se vuelve a abrir).
+- Con una app a pantalla completa en el monitor no se despliega (ni con el cursor ni con Windows).
+
+## D-94 — 1.2.4: el gancho de la tecla Windows no puede hacer nada lento
+Windows da unos 300 ms a un gancho de teclado de bajo nivel; pasado ese tiempo ignora su respuesta (la tecla pasa tal cual) y puede descartar el gancho. La acción de cada toque (comprobar y mover el panel y la barra de tareas, que consulta ventanas y espera al hilo principal) corría dentro del gancho: cuando tardaba, el soltado de Windows pasaba antes que las teclas inyectadas y se abría Inicio, y los toques siguientes ya no lo cerraban (Tesela se traga el toque). Ahora el gancho solo inyecta la tecla neutra y avisa a un hilo propio (`wm-winkey-tap`) que hace la acción. Como red de seguridad, si Inicio o la búsqueda quedan abiertos, el toque siguiente los cierra con Escape.
+
+## D-95 · La tecla Windows nunca llega sola a Windows (1.2.5)
+
+El intento anterior dejaba pasar la pulsación y trataba de cancelar Inicio después; no es fiable. Ahora el gancho retiene la pulsación de Windows: si llega otra tecla (o Ctrl) se entrega primero la pulsación retenida y el atajo funciona; si se suelta sola, Windows nunca la vio y solo se abre el panel de Tesela. La casilla «Tecla Windows abre el panel de Tesela» desactiva todo esto y devuelve Inicio.
+
+## D-96 · Diagnóstico y red de seguridad de la tecla Windows (1.2.6)
+
+El gancho ya examina también las teclas inyectadas por otros programas (solo ignora las marcadas por Tesela, `dwExtraInfo`). Hilo `wm-start-guard`: si la ventana al frente pasa a ser Inicio/Búsqueda de Windows mientras la tecla es de Tesela, se cierra con Escape. `state/winkey.log` registra cada evento de la tecla y lo que tarda cada acción, para diagnosticar casos que una prueba no reproduce.
+
+## D-97 · El panel devuelve el foco al cerrarse (1.2.7)
+
+El registro de 1.2.6 mostró que el gancho recibe y traga todos los toques de Windows; Inicio aparecía por otra vía. Hipótesis: al ocultarse el panel (que tenía el foco) y con la barra de Windows oculta, Windows elegía por su cuenta la ventana a activar. Ahora, al abrir se apunta la ventana con el foco y al cerrar se le devuelve antes de ocultar. `winkey.log` registra además cada cambio de foco y la decisión de cada toque.
+
+## D-98 · La búsqueda de Windows se cuela 1,4 s después del toque físico (1.2.8)
+
+El registro de 1.2.7 mostró que la ventana «Buscar» (SearchHost) toma el foco ~1,4 s después de que el panel se abre, sin ninguna pulsación entre medias, y solo con la tecla física (con teclas inyectadas no ocurre). El gancho recibe y traga todos los toques, así que no se pudo evitar en origen. El vigilante pasa de sondeo a evento (`EVENT_SYSTEM_FOREGROUND`): al llegar Inicio o Búsqueda al frente se oculta al instante, se le manda Escape y se devuelve el foco al panel si seguía abierto.
+
+## D-99 · Con el panel al frente el gancho de teclado se quedaba sordo (1.2.9)
+
+Causa real de que la tecla Windows abriese la búsqueda: mientras el panel (un WebView) tenía el foco, el gancho de teclado de Tesela dejaba de recibir teclas (también un gancho ajeno instalado antes); uno instalado después, en un hilo nuevo, sí las recibía. La tecla llegaba entonces a Windows. Arreglo: el panel abierto con la tecla Windows no se activa (estilo sin activación durante el `show`) y, cuando una ventana de Tesela pasa al frente, el gancho se reinstala en un hilo nuevo (150 y 500 ms después). El vigilante de foco sigue ocultando Inicio/Búsqueda por si se cuelan.
+
+## D-100 · Misma duración en panel y barra, y confirmación al cerrar (1.3.0)
+
+Panel y barra de tareas se muestran en 0,5 s y se ocultan en 0,38 s (la ventana se oculta a los 460 ms en ambos). «Cerrar Tesela» pide confirmación («Sí, cerrar» / «Cancelar», se retira sola a los 5 s).

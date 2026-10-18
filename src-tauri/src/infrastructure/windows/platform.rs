@@ -11,8 +11,9 @@ use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE};
 use windows::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEINPUT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    IsIconic, IsZoomed, PostMessageW, PostThreadMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SW_MINIMIZE,
-    SWP_NOOWNERZORDER, SWP_NOZORDER, SW_HIDE, SW_RESTORE, SW_SHOWNA, WM_CLOSE,
+    GetWindowLongW, IsIconic, IsZoomed, PostMessageW, PostThreadMessageW, SetForegroundWindow, SetWindowLongW, SetWindowPos, ShowWindow,
+    GWL_STYLE, HWND_TOP, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER, SW_HIDE, SW_MINIMIZE, SW_RESTORE, SW_SHOWNA,
+    WM_CLOSE, WS_CAPTION, WS_THICKFRAME,
 };
 
 use crate::application::ports::{SlideHandle, WindowPlatform};
@@ -29,6 +30,9 @@ use crate::domain::manageable::WindowFacts;
 use crate::infrastructure::windows::facts::{
     facts_of, fullscreen_state, hwnd_from, list_monitors, top_level_windows, visible_frame, window_exists, window_rect,
 };
+
+/// Estilo (barra de título y marco) que tenía cada ventana antes de ponerla a pantalla completa, para devolvérselo al salir.
+static FULLSCREEN_STYLES: std::sync::Mutex<Option<HashMap<WindowId, u32>>> = std::sync::Mutex::new(None);
 
 /// `DWMWA_CLOAK`: oculta la ventana sin minimizarla (§17 del plan).
 const DWMWA_CLOAK: DWMWINDOWATTRIBUTE = DWMWINDOWATTRIBUTE(13);
@@ -153,7 +157,40 @@ impl Win32Platform {
         }
     }
 
+    /// Pantalla completa de verdad: sin barra de título ni marco, cubriendo todo el monitor y por encima del resto de ventanas
+    /// (así Windows también esconde su barra de tareas). El estilo anterior se guarda para devolverlo al salir.
+    fn enter_fullscreen(id: WindowId, bounds: Rect) -> Result<(), String> {
+        unsafe {
+            let hwnd = hwnd_from(id);
+            if IsZoomed(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+            let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+            FULLSCREEN_STYLES.lock().unwrap().get_or_insert_with(HashMap::new).entry(id).or_insert(style);
+            SetWindowLongW(hwnd, GWL_STYLE, (style & !(WS_CAPTION.0 | WS_THICKFRAME.0)) as i32);
+            SetWindowPos(hwnd, Some(HWND_TOP), bounds.x, bounds.y, bounds.w, bounds.h, SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOOWNERZORDER)
+                .map_err(|e| e.message())
+        }
+    }
+
+    /// Devuelve a la ventana la barra de título y el marco que tenía antes de la pantalla completa (si los había quitado).
+    fn leave_fullscreen(id: WindowId) {
+        let saved = FULLSCREEN_STYLES.lock().unwrap().as_mut().and_then(|m| m.remove(&id));
+        if let Some(style) = saved {
+            unsafe {
+                let hwnd = hwnd_from(id);
+                SetWindowLongW(hwnd, GWL_STYLE, style as i32);
+                let _ = SetWindowPos(hwnd, None, 0, 0, 0, 0, windows::Win32::UI::WindowsAndMessaging::SWP_NOMOVE | windows::Win32::UI::WindowsAndMessaging::SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+            }
+        }
+    }
+
     fn place(id: WindowId, target: Rect) -> Result<(), String> {
+        // Un rectángulo que es justo un monitor entero es una pantalla completa; cualquier otro, una colocación normal.
+        if list_monitors().iter().any(|m| m.bounds == target) {
+            return Self::enter_fullscreen(id, target);
+        }
+        Self::leave_fullscreen(id);
         unsafe {
             let hwnd = hwnd_from(id);
             if IsZoomed(hwnd).as_bool() {
@@ -365,6 +402,7 @@ impl WindowPlatform for Win32Platform {
         }
         for (&id, &r) in &self.originals {
             if window_exists(id) {
+                Self::leave_fullscreen(id);
                 let _ = Self::set_pos(id, r);
             }
         }

@@ -45,10 +45,33 @@ describe("GeneralPanel", () => {
     expect(p.onAutostart).toHaveBeenCalledWith(true);
   });
 
-  it("cerrar Tesela cierra la app por completo", async () => {
+  it("las casillas de la interfaz de Windows guardan el cambio y muestran lo que devuelve el guardado", async () => {
+    const onShell = vi.fn().mockImplementation(async (v) => v);
+    render(GeneralPanel, props(base, { shell: { replace_taskbar: true, win_key_panel: true }, onShell }));
+    const taskbar = screen.getByLabelText(/Reemplazar la barra de tareas de Windows/) as HTMLInputElement;
+    const winKey = screen.getByLabelText(/La tecla Windows abre el panel/) as HTMLInputElement;
+    expect([taskbar.checked, winKey.checked]).toEqual([true, true]);
+    await fireEvent.click(taskbar);
+    expect(onShell).toHaveBeenLastCalledWith({ replace_taskbar: false, win_key_panel: true });
+    await fireEvent.click(winKey);
+    expect(onShell).toHaveBeenLastCalledWith({ replace_taskbar: false, win_key_panel: false });
+    await waitFor(() => expect(taskbar.checked).toBe(false));
+  });
+
+  it("sin los ajustes de Windows (aún no llegaron) no se muestran sus casillas", () => {
+    render(GeneralPanel, props());
+    expect(screen.queryByLabelText(/Reemplazar la barra de tareas/)).toBeNull();
+  });
+
+  it("cerrar Tesela pide confirmación y solo entonces cierra la app", async () => {
     const p = props();
     render(GeneralPanel, p);
     await fireEvent.click(screen.getByRole("button", { name: "Cerrar Tesela" }));
+    expect(p.onQuit).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(p.onQuit).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole("button", { name: "Cerrar Tesela" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Sí, cerrar" }));
     expect(p.onQuit).toHaveBeenCalledTimes(1);
   });
 
@@ -62,6 +85,7 @@ describe("GeneralPanel", () => {
   it("muestra el error si algo falla", async () => {
     render(GeneralPanel, props(base, { onQuit: vi.fn().mockRejectedValue("no se pudo") }));
     await fireEvent.click(screen.getByRole("button", { name: "Cerrar Tesela" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Sí, cerrar" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("no se pudo"));
   });
 

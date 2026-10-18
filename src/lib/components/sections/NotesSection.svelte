@@ -30,6 +30,9 @@
   let from = $state("");
   let to = $state("");
   let selected: string[] = $state([]);
+  /** Notas que se están borrando: se desvanecen y colapsan antes de quitarse de la lista. */
+  let leaving: string[] = $state([]);
+  const LEAVE_MS = 380;
 
   const shown = $derived(filterNotes(notes, query, { from, to }));
   const filtering = $derived(query.trim() !== "" || from !== "" || to !== "");
@@ -178,13 +181,20 @@
       return;
     }
     confirming = null;
+    if (leaving.includes(n.id)) return;
+    leaving = [...leaving, n.id];
+    const reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const animation = new Promise<void>((done) => setTimeout(done, reduced ? 0 : LEAVE_MS));
     try {
       await api.remove(n.id);
+      await animation;
       notes = notes.filter((x) => x.id !== n.id);
       selected = selected.filter((id) => id !== n.id);
       ok("Nota borrada.");
     } catch (e) {
       fail(e);
+    } finally {
+      leaving = leaving.filter((id) => id !== n.id);
     }
   }
 
@@ -293,7 +303,8 @@
 
   <ul class="list">
     {#each shown as n (n.id)}
-      <li class="note" class:marked={selected.includes(n.id)}>
+      <li class="note" class:marked={selected.includes(n.id)} class:leaving={leaving.includes(n.id)}>
+       <div class="card">
         {#if editing === n.id}
           <textarea class="edit" bind:value={editText} rows="3" aria-label="Editar nota"></textarea>
           <div class="row">
@@ -313,6 +324,7 @@
             </button>
           </div>
         {/if}
+       </div>
       </li>
     {:else}
       <li class="hint">{notes.length === 0 ? "Aún no hay notas. Escribe la primera arriba." : "Ninguna nota coincide con la búsqueda."}</li>
@@ -342,8 +354,13 @@
   /* Al editar, un 20 % más alto (no más ancho): 3 filas son unos 73 px. */
   textarea.edit { height: 88px; }
   textarea:focus, .search:focus { outline: none; border-color: var(--accent); }
-  .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 230px; overflow: auto; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent; }
-  .note { padding: 8px 10px; border-radius: 14px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+  .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: 230px; overflow: auto; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent; }
+  /* Al borrarla la nota se desvanece, se desliza y colapsa su altura: las de abajo suben suavemente. */
+  .note { display: grid; grid-template-rows: 1fr; margin-bottom: 6px; transition: grid-template-rows 0.38s cubic-bezier(.3, 0, .2, 1), margin-bottom 0.38s cubic-bezier(.3, 0, .2, 1), opacity 0.3s ease, transform 0.38s ease; }
+  .card { min-height: 0; overflow: hidden; padding: 8px 10px; border-radius: 14px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+  .note.leaving { grid-template-rows: 0fr; margin-bottom: 0; opacity: 0; transform: translateX(14px); pointer-events: none; }
+  .note.leaving .card { padding-top: 0; padding-bottom: 0; border-color: transparent; }
+  @media (prefers-reduced-motion: reduce) { .note { transition: none; } }
   .text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; max-height: 5.4em; overflow: hidden; }
   .row, .footer { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .spacer { flex: 1; }
@@ -383,6 +400,6 @@
   .pickbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; font: 11px var(--mono); color: var(--muted); }
   .pick { accent-color: var(--accent); cursor: pointer; width: 15px; height: 15px; margin: 0; }
   .pick.all { display: flex; align-items: center; gap: 6px; cursor: pointer; }
-  .note.marked { border-color: var(--accent); background: rgba(255, 255, 255, 0.09); }
+  .note.marked .card { border-color: var(--accent); background: rgba(255, 255, 255, 0.09); }
   .btn.danger { background: transparent; }
 </style>

@@ -77,6 +77,9 @@ pub fn run() {
     if args.recover {
         let n = infrastructure::windows::platform::recover_cloaked_windows();
         eprintln!("[wm] ventanas recuperadas: {n}");
+        if infrastructure::windows::winshell::recover_taskbar() {
+            eprintln!("[wm] barra de tareas de Windows devuelta");
+        }
         return;
     }
 
@@ -220,6 +223,12 @@ pub fn run() {
             interface::commands::audio_set_output,
             interface::commands::open_windows_settings,
             interface::commands::wallpaper_color,
+            interface::commands::shell_get,
+            interface::commands::shell_set,
+            interface::commands::taskbar_resize,
+            interface::commands::taskbar_hide,
+            interface::commands::focus_window,
+            interface::commands::app_icon,
             interface::commands::modules_list,
             interface::commands::modules_preview,
             interface::commands::modules_install,
@@ -277,6 +286,7 @@ pub fn run() {
             #[cfg(windows)]
             {
                 interface::bar::undock_all(_app);
+                interface::shell::shutdown(_app);
                 if let Some(state) = _app.try_state::<interface::commands::AppState>() {
                     if let Some(rt) = state.manager.lock().unwrap().take() {
                         rt.stop();
@@ -311,6 +321,8 @@ fn setup_windows(
 
     if args.bar {
         interface::bar::start_hover_trigger(&handle);
+        // Barra de tareas propia y tecla Windows (según sus ajustes; se devuelve la de Windows si quedó oculta).
+        interface::shell::init(&handle);
         // Vigila conexiones y desconexiones de monitores para crear y retirar barras.
         let watcher = handle.clone();
         std::thread::spawn(move || {

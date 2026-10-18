@@ -330,6 +330,19 @@ describe("NotesSection", () => {
     });
   });
 
+  it("al borrar una nota se desvanece (clase leaving) y después sale de la lista", async () => {
+    const day = (d: number) => new Date(2026, 9, d, 12, 0).getTime();
+    const { container } = render(NotesSection, { api: notesApi([note("1", "primera", day(10)), note("2", "segunda", day(11))]) });
+    await waitFor(() => expect(screen.getByText("segunda")).toBeTruthy());
+    const li = screen.getByText("primera").closest("li")!;
+    await fireEvent.click(li.querySelector(".danger")!);
+    await fireEvent.click(li.querySelector(".danger")!);
+    expect(li.classList.contains("leaving")).toBe(true);
+    expect(screen.getByText("segunda")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("primera")).toBeNull());
+    expect(container.querySelectorAll("li.note").length).toBe(1);
+  });
+
   it("un error se muestra sin romper nada", async () => {
     render(NotesSection, { api: notesApi([], { add: vi.fn().mockRejectedValue("la nota es demasiado larga") }) });
     await fireEvent.input(screen.getByLabelText("Nueva nota"), { target: { value: "x" } });

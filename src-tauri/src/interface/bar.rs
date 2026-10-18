@@ -84,6 +84,7 @@ pub fn sync_bars(app: &AppHandle, monitors: &[Monitor]) {
             eprintln!("[wm] barra {label} reservó {reserved:?}");
         }
     }
+    crate::interface::taskbar::sync(app, monitors);
 }
 
 /// Muestra u oculta la barra de un monitor (pantalla completa, §6.4) sin quitarle el foco a nadie.
@@ -91,6 +92,8 @@ pub fn set_bar_visible(app: &AppHandle, monitor: u32, visible: bool) {
     if let Some(h) = app.get_webview_window(&bar_label(monitor)).as_ref().and_then(hwnd_of) {
         appbar::set_visible(h, visible);
     }
+    // La barra de tareas de ese monitor también cede el paso a la pantalla completa.
+    crate::interface::taskbar::set_fullscreen(app, monitor, !visible);
 }
 
 /// Quita la reserva de todas las barras (al salir).
@@ -107,6 +110,11 @@ pub fn undock_all(app: &AppHandle) {
 /// Abre o cierra el panel desplegable en el monitor indicado (§9.2).
 pub fn toggle_panel(app: &AppHandle, monitor: u32) {
     open_panel_thread(app, monitor, true);
+}
+
+/// Igual, pero sin darle el foco al panel: la ventana que lo tenía lo conserva.
+pub fn toggle_panel_unfocused(app: &AppHandle, monitor: u32) {
+    open_panel_thread(app, monitor, false);
 }
 
 fn open_panel_thread(app: &AppHandle, monitor: u32, focus: bool) {
@@ -190,13 +198,34 @@ fn toggle_panel_inner(app: &AppHandle, monitor: u32, focus: bool) {
         crate::infrastructure::windows::backdrop::remember_panel(Rect::new(x, y, w as i32, reach));
     }
     crate::interface::webview::set_visible(&window, true);
-    let _ = window.show();
-    // Abierto con el cursor no roba el foco a la app en uso.
     if focus {
+        let _ = window.show();
         let _ = window.set_focus();
+    } else {
+        // Abierto con el cursor o con la tecla Windows no roba el foco a la app en uso: con el panel como ventana activa,
+        // los ganchos de teclado dejaban de recibir la tecla Windows y Windows abría su búsqueda.
+        show_without_activating(&window);
     }
     // La ventana se reutiliza: la vista relanza así su animación de aparición.
     let _ = window.emit("wm-panel-shown", ());
+}
+
+/// Muestra la ventana sin activarla: durante el `show` lleva el estilo «sin activación» y después se lo quita, para que un
+/// clic sobre ella sí la active con normalidad.
+fn show_without_activating(window: &tauri::WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongW, SetWindowLongW, GWL_EXSTYLE, WS_EX_NOACTIVATE};
+    let Some(h) = hwnd_of(window) else {
+        let _ = window.show();
+        return;
+    };
+    let hwnd = HWND(h as *mut _);
+    unsafe {
+        let ex = GetWindowLongW(hwnd, GWL_EXSTYLE);
+        SetWindowLongW(hwnd, GWL_EXSTYLE, ex | WS_EX_NOACTIVATE.0 as i32);
+        let _ = window.show();
+        SetWindowLongW(hwnd, GWL_EXSTYLE, ex & !(WS_EX_NOACTIVATE.0 as i32));
+    }
 }
 
 /// Cambia el alto del panel (lógico) conservando su borde superior y su centro.
@@ -216,7 +245,7 @@ pub fn hide_panel(app: &AppHandle) {
 }
 
 /// ¿El panel está en pantalla y no se está cerrando?
-fn panel_open(app: &AppHandle) -> bool {
+pub fn panel_open(app: &AppHandle) -> bool {
     !PANEL_CLOSING.load(Ordering::SeqCst)
         && app.get_webview_window(PANEL_LABEL).is_some_and(|w| w.is_visible().unwrap_or(false))
 }

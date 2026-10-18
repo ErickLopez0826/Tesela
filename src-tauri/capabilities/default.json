@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Permisos de la ventana principal, las barras (una por monitor) y el panel",
-  "windows": ["main", "bar-*", "panel", "focus-border"],
+  "windows": ["main", "bar-*", "taskbar-*", "panel", "focus-border"],
   "permissions": ["core:default"]
 }

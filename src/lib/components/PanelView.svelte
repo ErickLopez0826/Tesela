@@ -22,6 +22,7 @@
   import type { InstalledModule } from "../api/modules";
   import DotField from "./DotField.svelte";
   import GlassBackdrop from "./GlassBackdrop.svelte";
+  import { effectiveLuma, toneFor } from "../stores/tone";
   import { theme } from "../stores/theme";
   import WeatherIcon from "./WeatherIcon.svelte";
   import ModuleSections from "./ModuleSections.svelte";
@@ -205,16 +206,19 @@
   const date = $derived(now.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" }));
   // De noche el cielo despejado se muestra como luna.
   const night = $derived(now.getHours() < 6 || now.getHours() >= 19);
+  // El texto se adapta al fondo: claro sobre oscuro, oscuro sobre claro (tinte del panel + lo que se ve a través).
+  let behind: number | null = $state(null);
+  const tone = $derived(toneFor(effectiveLuma(behind, 1 - $theme.panelTransparency / 100)));
   const hasModulePanels = $derived(otherModules.some((m) => m.enabled && m.manifest.ui.panel));
 </script>
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && onClose()} />
 
-<div class="shell open" bind:this={shell} style:height={`${tabHeight}px`}>
-  <GlassBackdrop kind="panel" blur={$theme.panelBlur} tick={openTick} />
+<div class="shell open" bind:this={shell} style:height={`${tabHeight}px`} style:--fg={tone.fg} style:--muted={tone.muted}>
+  <GlassBackdrop kind="panel" blur={$theme.panelBlur} tick={openTick} onLuma={(l) => (behind = l)} />
   <div class="tint" aria-hidden="true"></div>
   <DotField fixed={false} />
-  <div class="panel">
+  <div class="panel" style:--fg={tone.fg} style:--muted={tone.muted}>
     <nav class="tabs" aria-label="Secciones del panel" bind:this={tabsEl}>
       <span class="pill" class:ready={pill.ready} style:left={`${pill.left}px`} style:right={`${pill.right}px`} aria-hidden="true"></span>
       {#each visibleTabs as t (t.id)}

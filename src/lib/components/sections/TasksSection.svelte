@@ -85,6 +85,7 @@
   <ul class="list">
     {#each tasks as t, i (t.id)}
       <li class="task" class:done={finishing.includes(t.id)} data-priority={t.priority}>
+       <div class="card">
         <button class="check" aria-label={`Marcar como hecha: ${t.text}`} onclick={() => done(t)}>
           <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8" /></svg>
         </button>
@@ -96,6 +97,7 @@
           <button aria-label={`Subir: ${t.text}`} disabled={i === 0} onclick={() => reorder(t, -1)}>↑</button>
           <button aria-label={`Bajar: ${t.text}`} disabled={i === tasks.length - 1} onclick={() => reorder(t, 1)}>↓</button>
         </span>
+       </div>
       </li>
     {:else}
       <li class="empty hint">Sin tareas pendientes.</li>
@@ -119,12 +121,15 @@
   .add input:focus, .add select:focus { outline: none; border-color: var(--accent); }
   .add select { font: 11px var(--mono); color: var(--fg); background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line); border-radius: 12px; padding: 6px 6px; cursor: pointer; }
   .add select option { background: #121214; }
-  .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; max-height: 190px; overflow: auto; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent; }
-  .task { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 12px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); border-left: 3px solid var(--prio, var(--muted)); transition: opacity 0.38s ease, transform 0.38s ease; }
+  .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: 190px; overflow: auto; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent; }
+  /* Al marcarla como hecha la tarea se desvanece, se desliza y colapsa su altura: las de abajo suben suavemente. */
+  .task { display: grid; grid-template-rows: 1fr; margin-bottom: 5px; transition: grid-template-rows 0.38s cubic-bezier(.3, 0, .2, 1), margin-bottom 0.38s cubic-bezier(.3, 0, .2, 1), opacity 0.3s ease, transform 0.38s ease; }
+  .card { display: flex; align-items: center; gap: 8px; min-height: 0; overflow: hidden; padding: 6px 8px; border-radius: 12px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); border-left: 3px solid var(--prio, var(--muted)); }
   .task[data-priority="high"] { --prio: #ff5a5f; }
   .task[data-priority="medium"] { --prio: #ffc062; }
   .task[data-priority="low"] { --prio: var(--muted); }
-  .task.done { opacity: 0; transform: translateX(14px); }
+  .task.done { grid-template-rows: 0fr; margin-bottom: 0; opacity: 0; transform: translateX(14px); }
+  .task.done .card { padding-top: 0; padding-bottom: 0; border-color: transparent; }
   .task.done .text { text-decoration: line-through; }
   .check { display: grid; place-items: center; flex: none; width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1.5px solid var(--muted); background: transparent; color: transparent; cursor: pointer; transition: background 0.25s, color 0.25s, border-color 0.25s; }
   .check:hover, .task.done .check { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
