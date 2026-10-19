@@ -3,8 +3,10 @@
   import { onMount } from "svelte";
   import ExclusionPanel from "./ExclusionPanel.svelte";
   import GeneralPanel from "./GeneralPanel.svelte";
+  import SearchSettings from "./SearchSettings.svelte";
   import { appsApi, type StartupApp } from "../api/apps";
   import { generalApi, type GeneralStatus } from "../api/general";
+  import { searchSettingsApi } from "../api/search";
   import { shellApi, type ShellSettings } from "../api/shell";
   import { exclusionsStore } from "../stores/exclusions";
   import { windowsStore } from "../stores/windows";
@@ -12,9 +14,10 @@
   /** Sube cada vez que el panel se abre: la lista de ventanas abiertas se vuelve a leer. */
   let { tick = 0 }: { tick?: number } = $props();
 
-  type Section = "exclusions" | "general";
+  type Section = "exclusions" | "search" | "general";
   const SECTIONS: { id: Section; label: string }[] = [
     { id: "exclusions", label: "Aplicaciones excluidas" },
+    { id: "search", label: "Buscador" },
     { id: "general", label: "General" },
   ];
 
@@ -53,6 +56,8 @@
       onAdd={(exe, title) => exclusionsStore.add(exe, title)}
       onRemove={(r) => exclusionsStore.remove(r.exe, r.title_contains)}
     />
+  {:else if section === "search"}
+    <SearchSettings api={searchSettingsApi} />
   {:else}
     <GeneralPanel
       status={general}

@@ -190,6 +190,7 @@ fn capture_wallpaper(r: Rect) -> Option<Raw> {
 
 static BARS: Mutex<Option<HashMap<String, Raw>>> = Mutex::new(None);
 static PANEL: Mutex<Option<Raw>> = Mutex::new(None);
+static SEARCH: Mutex<Option<Raw>> = Mutex::new(None);
 
 /// Imagen para la barra `label`, que ocupa `r`. Con `refresh` (o sin copia previa, o si cambió de sitio) se vuelve a copiar el fondo.
 pub fn bar_image(label: &str, r: Rect, intensity: f32, scale: f64, refresh: bool) -> Option<GlassImage> {
@@ -214,17 +215,33 @@ pub fn forget_panel() {
     *PANEL.lock().unwrap() = None;
 }
 
-/// Imagen para el panel. Con `refresh` (cambió el fondo de pantalla con el panel abierto) se vuelve a copiar el fondo de
-/// pantalla de su zona: con el panel encima no se puede copiar la pantalla entera, así que se ven solo el fondo, sin ventanas.
-pub fn panel_image(intensity: f32, scale: f64, refresh: bool) -> Option<GlassImage> {
+/// Imagen guardada en `slot`. Con `refresh` (cambió el fondo de pantalla con la ventana abierta) se vuelve a copiar el fondo
+/// de pantalla de su zona: con la ventana encima no se puede copiar la pantalla entera, así que se ven solo el fondo, sin ventanas.
+fn slot_image(slot: &Mutex<Option<Raw>>, intensity: f32, scale: f64, refresh: bool) -> Option<GlassImage> {
     if refresh {
-        let area = PANEL.lock().unwrap().as_ref().map(|raw| raw.src);
+        let area = slot.lock().unwrap().as_ref().map(|raw| raw.src);
         if let Some(fresh) = area.and_then(capture_wallpaper) {
-            *PANEL.lock().unwrap() = Some(fresh);
+            *slot.lock().unwrap() = Some(fresh);
         }
     }
-    let raw = PANEL.lock().unwrap().clone()?;
+    let raw = slot.lock().unwrap().clone()?;
     Some(render(&raw, intensity, scale))
+}
+
+/// Imagen para el panel.
+pub fn panel_image(intensity: f32, scale: f64, refresh: bool) -> Option<GlassImage> {
+    slot_image(&PANEL, intensity, scale, refresh)
+}
+
+/// Guarda lo que hay detrás del buscador (llamar justo antes de mostrarlo). Tiene su propia copia: el buscador y el panel
+/// pueden estar en monitores y zonas distintas.
+pub fn remember_search(r: Rect) {
+    *SEARCH.lock().unwrap() = capture_screen(r);
+}
+
+/// Imagen para el buscador.
+pub fn search_image(intensity: f32, scale: f64, refresh: bool) -> Option<GlassImage> {
+    slot_image(&SEARCH, intensity, scale, refresh)
 }
 
 #[cfg(test)]

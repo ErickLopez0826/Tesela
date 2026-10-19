@@ -99,7 +99,7 @@ pub fn keep_hook_fresh() {
         while started.elapsed() < std::time::Duration::from_secs(600) {
             std::thread::sleep(std::time::Duration::from_millis(400));
             winkey::reinstall();
-            let open = APP.get().is_some_and(crate::interface::bar::panel_open);
+            let open = APP.get().is_some_and(|app| crate::interface::bar::panel_open(app) || crate::interface::search::is_open(app));
             if !open && started.elapsed() > std::time::Duration::from_millis(1500) {
                 break;
             }
@@ -127,8 +127,8 @@ fn start_guard() {
     });
 }
 
-/// Apunta la ventana con el foco (si no es de Tesela) para devolvérselo al cerrar el panel.
-fn remember_foreground() {
+/// Apunta la ventana con el foco (si no es de Tesela) para devolvérselo al cerrar el panel o el buscador.
+pub(crate) fn remember_foreground() {
     use crate::infrastructure::windows::facts::{facts_of, id_of};
     let hwnd = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
     let mine = facts_of(id_of(hwnd)).is_none_or(|f| f.exe.to_lowercase().starts_with("tesela"));
@@ -136,13 +136,17 @@ fn remember_foreground() {
 }
 
 /// Devuelve el foco a la ventana que lo tenía antes del panel, si sigue existiendo.
-fn restore_previous_focus() {
-
+pub(crate) fn restore_previous_focus() {
     use crate::infrastructure::windows::facts::window_exists;
     let id = std::mem::take(&mut *PREVIOUS.lock().unwrap());
     if id != 0 && window_exists(id) {
         crate::infrastructure::windows::platform::focus_window(id);
     }
+}
+
+/// Olvida la ventana apuntada con `remember_foreground`: el foco ya es de otra y no se le debe quitar.
+pub(crate) fn forget_previous_focus() {
+    *PREVIOUS.lock().unwrap() = 0;
 }
 
 fn apply(app: &AppHandle, s: ShellSettings) {

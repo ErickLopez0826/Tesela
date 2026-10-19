@@ -1185,6 +1185,7 @@ impl Desktop {
             | Action::OpenTerminal
             | Action::TogglePause
             | Action::TogglePanel
+            | Action::ToggleSearch
             | Action::ReloadConfig
             | Action::Exit => vec![],
         }

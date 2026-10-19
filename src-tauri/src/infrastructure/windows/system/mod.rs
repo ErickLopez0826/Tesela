@@ -11,6 +11,7 @@ pub mod overview;
 pub mod network;
 pub mod power;
 pub mod radios;
+pub mod search_host;
 pub mod speedtest;
 pub mod volume;
 pub mod wallpaper;

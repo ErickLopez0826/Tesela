@@ -1,6 +1,6 @@
 # Window Manager App: Documento de planificación
 
-Versión: 0.2 (planificación; el código avanza por fases, ver PROGRESS.md; la sección 18 añade el buscador, pendiente de implementar)
+Versión: 0.3 (planificación; el código avanza por fases, ver PROGRESS.md; la sección 18 describe el buscador, implementado en la versión 2.0.0)
 Autor: Erick
 Estado: Pendiente de cerrar tres decisiones marcadas en la sección 11
 
@@ -45,7 +45,7 @@ GlazeWM se mantiene instalado como respaldo durante todo el desarrollo.
 | Apps en el panel | Dos listas: **abiertas** y **fijadas**, intercambiables. |
 | Módulo de pareja | Instalable por separado. Mensajes en tiempo real con delay razonable. Avatar animado. Último en desarrollarse. |
 | ai-bridge.py | Fuera de alcance por ahora. Muestra tokens de Claude y Gemini. Se retoma después. |
-| Buscador de aplicaciones | Tesela tendrá su **propio buscador** para poder eliminar Flow Launcher. Se abre con **ctrl+shift+espacio**. Detalle en la sección 18. **Pendiente de implementar** (decidido por Erick: se deja para después). |
+| Buscador de aplicaciones | Tesela tendrá su **propio buscador** para poder eliminar Flow Launcher. Se abre con **ctrl+shift+espacio**. Detalle en la sección 18. **Implementado en la versión 2.0.0** (D-106 en DECISIONS.md). |
 
 ---
 
@@ -415,12 +415,12 @@ Cada fase tiene un criterio de terminado. No se pasa a la siguiente sin cumplirl
 - Arranque con Windows, instalador, actualizaciones.
 - **Terminado cuando**: la app arranca sola, se instala con un solo archivo y se actualiza.
 
-### Fase 11: Buscador de aplicaciones (pendiente)
+### Fase 11: Buscador de aplicaciones (hecha en la versión 2.0.0)
 - Atajo global, ventana de búsqueda junto a la barra, resultados con cristal y animaciones del panel.
 - Aplicaciones instaladas y abiertas, redirecciones y búsquedas web configurables desde el panel.
 - Orden por coincidencia y uso reciente; Enter abre y ctrl+Enter abre como administrador.
 - **Terminado cuando**: Erick puede desinstalar Flow Launcher y hacer con Tesela todo lo que hacía con él (sección 18.12).
-- El detalle completo está en la sección 18. No se implementa hasta que Erick lo pida.
+- El detalle completo está en la sección 18.
 
 ---
 
@@ -528,11 +528,10 @@ Los conceptos que cambian:
 
 ---
 
-## 18. Buscador de aplicaciones propio (pendiente de implementar)
+## 18. Buscador de aplicaciones propio (implementado en la versión 2.0.0)
 
-> **Estado: planificado, no implementado.** Erick decidió dejarlo para después. Esta sección fija lo acordado para que
-> se pueda construir sin volver a preguntar. Las decisiones marcadas «a confirmar» son suposiciones razonables que Erick
-> puede cambiar al empezar.
+> **Estado: implementado en la versión 2.0.0.** Esta sección conserva lo acordado; las decisiones que quedaban «a confirmar»
+> se cerraron al empezar (ver 18.14) y lo que se hizo está en D-106 de DECISIONS.md.
 
 ### 18.1 Objetivo
 
@@ -691,7 +690,14 @@ Búsqueda de archivos y carpetas, calculadora y conversiones, comandos del siste
 complementos de terceros y sincronización de las redirecciones entre equipos. Todo eso puede añadirse después como
 fuentes nuevas sin cambiar la arquitectura de 18.9.
 
-### 18.14 Detalles a confirmar al empezar
+### 18.14 Detalles que se confirmaron al empezar
+
+**Respuestas de Erick:** (1) sin búsquedas web de fábrica: `search.json` empieza vacío y todo se añade desde Ajustes → Buscador;
+(2) centrada bajo la barra superior del monitor del cursor, como el panel; (3) Flow Launcher puede convivir mientras tanto;
+(4) el atajo es `ctrl+shift+espacio` y, si choca, se cambia en `config.toml`; (5) **sin aplicaciones de la Tienda de Microsoft
+(UWP)**: solo los accesos directos del menú Inicio que apuntan a un `.exe`.
+
+Las preguntas originales eran:
 
 1. **Búsquedas web**: formato con `{q}` y la palabra clave seguida de un espacio (suposición de 18.6). ¿Se quiere alguna
    de fábrica además de Google?

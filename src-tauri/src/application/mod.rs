@@ -5,4 +5,5 @@ pub mod controller;
 pub mod list_windows;
 pub mod modules;
 pub mod ports;
+pub mod search;
 pub mod system;

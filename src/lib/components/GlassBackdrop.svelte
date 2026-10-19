@@ -13,7 +13,7 @@
     onLuma,
     anchored = null,
   }: {
-    kind: "bar" | "panel";
+    kind: "bar" | "panel" | "search";
     blur: number;
     tick?: number;
     onLuma?: (luma: number | null) => void;
@@ -62,7 +62,7 @@
     const amount = blur;
     void tick;
     clearTimeout(timer);
-    timer = setTimeout(() => void load(false), kind === "panel" ? 0 : SLIDER_DELAY_MS);
+    timer = setTimeout(() => void load(false), kind === "bar" ? SLIDER_DELAY_MS : 0);
     return () => clearTimeout(timer);
   });
 

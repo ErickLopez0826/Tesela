@@ -50,12 +50,20 @@ pub struct Callbacks {
     pub bar: Arc<dyn Fn(u32, bool) + Send + Sync>,
     pub state: Arc<dyn Fn(&StateSnapshot) + Send + Sync>,
     pub panel: Arc<dyn Fn(u32) + Send + Sync>,
+    /// Abre o cierra el buscador de aplicaciones (§18).
+    pub search: Arc<dyn Fn() + Send + Sync>,
 }
 
 impl Callbacks {
     /// Callbacks que no hacen nada (pruebas).
     pub fn silent() -> Self {
-        Callbacks { notice: Arc::new(|_| {}), bar: Arc::new(|_, _| {}), state: Arc::new(|_| {}), panel: Arc::new(|_| {}) }
+        Callbacks {
+            notice: Arc::new(|_| {}),
+            bar: Arc::new(|_, _| {}),
+            state: Arc::new(|_| {}),
+            panel: Arc::new(|_| {}),
+            search: Arc::new(|| {}),
+        }
     }
 }
 
@@ -71,6 +79,8 @@ pub struct Win32Platform {
     state: Option<Arc<dyn Fn(&StateSnapshot) + Send + Sync>>,
     /// Abre o cierra el panel desplegable de un monitor.
     panel: Option<Arc<dyn Fn(u32) + Send + Sync>>,
+    /// Abre o cierra el buscador de aplicaciones.
+    search: Option<Arc<dyn Fn() + Send + Sync>>,
     /// Posición original de cada ventana la primera vez que se toca.
     originals: HashMap<WindowId, Rect>,
     /// Ventanas ocultas y con qué método.
@@ -118,6 +128,7 @@ impl Win32Platform {
             bar: Some(cb.bar),
             state: Some(cb.state),
             panel: Some(cb.panel),
+            search: Some(cb.search),
             ..Default::default()
         }
     }
@@ -359,6 +370,12 @@ impl WindowPlatform for Win32Platform {
     fn toggle_panel(&mut self, monitor: u32) {
         if let Some(cb) = &self.panel {
             cb(monitor);
+        }
+    }
+
+    fn toggle_search(&mut self) {
+        if let Some(cb) = &self.search {
+            cb();
         }
     }
 

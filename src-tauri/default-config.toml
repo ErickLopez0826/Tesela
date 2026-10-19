@@ -271,6 +271,13 @@ keys = ["alt+space"]
 action = "toggle_panel"
 keys = ["alt+b"]
 
+# Buscador de aplicaciones (§18): abre y cierra la ventana de búsqueda. Sigue activo con el gestor en pausa.
+# Si otro programa ya usa esta combinación, cámbiala aquí y recarga con alt+shift+r.
+# Para desactivarlo, deja la lista vacía: keys = []
+[[keybinding]]
+action = "toggle_search"
+keys = ["ctrl+shift+space"]
+
 # 8.7 Sistema
 [[keybinding]]
 action = "open_terminal"

@@ -17,8 +17,11 @@
     | "refresh"
     | "power"
     | "snowflake"
-    | "folder";
-  let { name, size = 16 }: { name: IconName; size?: number } = $props();
+    | "folder"
+    | "search"
+    | "globe";
+  /** `level`: solo el Wi-Fi. Cuántos de sus 3 arcos se ven encendidos (0 a 3); los demás quedan tenues. */
+  let { name, size = 16, level = 3 }: { name: IconName; size?: number; level?: number } = $props();
 </script>
 
 <svg class="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -41,7 +44,10 @@
   {:else if name === "arrow-up"}
     <path d="M12 19V5" /><path d="m5 12 7-7 7 7" />
   {:else if name === "wifi"}
-    <path d="M5 12.55a11 11 0 0 1 14.08 0" /><path d="M1.42 9a16 16 0 0 1 21.16 0" /><path d="M8.53 16.11a6 6 0 0 1 6.95 0" /><path d="M12 20h.01" />
+    <path class="arc" class:dim={level < 3} d="M1.42 9a16 16 0 0 1 21.16 0" />
+    <path class="arc" class:dim={level < 2} d="M5 12.55a11 11 0 0 1 14.08 0" />
+    <path class="arc" class:dim={level < 1} d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+    <path d="M12 20h.01" />
   {:else if name === "bluetooth"}
     <path d="m7 7 10 10-5 5V2l5 5L7 17" />
   {:else if name === "share"}
@@ -56,9 +62,16 @@
     <path d="M2 12h20" /><path d="M12 2v20" /><path d="m20 16-4-4 4-4" /><path d="m4 8 4 4-4 4" /><path d="m16 4-4 4-4-4" /><path d="m8 20 4-4 4 4" />
   {:else if name === "folder"}
     <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+  {:else if name === "search"}
+    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+  {:else if name === "globe"}
+    <circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
   {/if}
 </svg>
 
 <style>
   .icon { display: inline-block; vertical-align: -0.2em; flex: none; }
+  /* Wi-Fi: los arcos que la señal no alcanza quedan tenues y cambian suavemente al subir o bajar. */
+  .arc { transition: opacity 0.4s ease; }
+  .arc.dim { opacity: 0.25; }
 </style>

@@ -4,6 +4,7 @@
   import type { ActionOutcome, AudioApi, AudioDevice, NetworkApi, RadioKindName, RadioState } from "../../api/system";
   import AudioDetails from "./AudioDetails.svelte";
   import ConnectivityDetails from "./ConnectivityDetails.svelte";
+  import { signalText, wifiArcs } from "../../stores/wifi";
 
   let {
     radios,
@@ -91,8 +92,9 @@
   <div class="tiles">
     {#each radios as r (r.kind)}
       <div class="cell">
-        <button class="tile" class:on={r.on} disabled={!r.available} aria-pressed={r.on} onclick={() => toggle(r)}>
-          <span class="ico"><Icon name={icons[r.kind]} size={18} /></span>
+        <button class="tile" class:on={r.on} disabled={!r.available} aria-pressed={r.on} title={r.kind === "wifi" && r.on ? signalText(r.signal) || undefined : undefined} onclick={() => toggle(r)}>
+          <!-- El icono de Wi-Fi sigue a la intensidad de la conexión: más o menos arcos según la señal. -->
+          <span class="ico"><Icon name={icons[r.kind]} size={18} level={r.kind === "wifi" && r.on ? wifiArcs(r.signal) : undefined} /></span>
           <span class="txt"><strong>{labels[r.kind]}</strong><small>{r.available ? (r.on ? "sí" : "no") : "no disponible"}</small></span>
         </button>
         {#if network && r.available}

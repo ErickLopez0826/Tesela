@@ -308,7 +308,7 @@ pub mod fakes {
     pub struct FakeRadios(pub Calls);
     impl RadioControl for FakeRadios {
         fn states(&mut self) -> Vec<RadioState> {
-            vec![RadioState { kind: RadioKind::Wifi, available: true, on: true }]
+            vec![RadioState { kind: RadioKind::Wifi, available: true, on: true, signal: Some(3) }]
         }
         fn set(&mut self, kind: RadioKind, on: bool) -> Result<ActionOutcome, String> {
             self.0.log(format!("radio:{kind:?}:{on}"));

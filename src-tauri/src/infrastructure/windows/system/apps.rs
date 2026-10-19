@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use windows::core::{w, HSTRING};
-use windows::Win32::UI::Shell::ShellExecuteW;
+use windows::core::{w, HRESULT, HSTRING, PCWSTR};
+use windows::Win32::UI::Shell::{ShellExecuteExW, ShellExecuteW, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW};
 use windows::Win32::UI::WindowsAndMessaging::{IsIconic, ShowWindow, SW_RESTORE, SW_SHOWNORMAL};
 
 use crate::application::system::AppsControl;
@@ -77,6 +77,43 @@ impl AppsControl for Win32Apps {
     }
 }
 
+/// `ERROR_CANCELLED`: el usuario dijo que no en el aviso de control de cuentas (UAC).
+const ERROR_CANCELLED: i32 = 1223;
+
+/// Abre un programa o acceso directo pidiendo elevación (verbo `runas`). Windows muestra su aviso de control de cuentas;
+/// Tesela no lo guarda ni lo salta. Si el usuario lo cancela no es un error (§18.8).
+pub fn launch_elevated(target: &str) -> Result<(), String> {
+    let file = HSTRING::from(target);
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
+        // Esperar a que el sistema termine de lanzar: esta función se llama desde hilos que acaban enseguida.
+        fMask: SEE_MASK_NOASYNC,
+        lpVerb: w!("runas"),
+        lpFile: PCWSTR(file.as_ptr()),
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
+    };
+    match unsafe { ShellExecuteExW(&mut info) } {
+        Ok(()) => Ok(()),
+        Err(e) if e.code() == HRESULT::from_win32(ERROR_CANCELLED as u32) => Ok(()),
+        Err(e) => Err(format!("Windows no pudo abrir {target} como administrador: {e}")),
+    }
+}
+
+/// Abre una dirección web en el navegador predeterminado. Solo `http://` y `https://` (§18.10): nunca `file:`, `javascript:`
+/// ni nada que Windows pudiera interpretar como un programa. No pasa por ninguna consola.
+pub fn open_http(url: &str) -> Result<(), String> {
+    if !crate::domain::search::is_http_url(url) {
+        return Err("solo se pueden abrir direcciones http:// o https://".into());
+    }
+    let result = unsafe { ShellExecuteW(None, w!("open"), &HSTRING::from(url), None, None, SW_SHOWNORMAL) };
+    if (result.0 as isize) > 32 {
+        Ok(())
+    } else {
+        Err(format!("Windows no pudo abrir la dirección (código {})", result.0 as isize))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,5 +136,12 @@ mod tests {
     #[test]
     fn enfocar_una_ventana_que_no_existe_da_error() {
         assert!(Win32Apps::new(Arc::default()).focus(0x7FFF_FFF0).is_err());
+    }
+
+    #[test]
+    fn abrir_una_direccion_rechaza_todo_lo_que_no_sea_http() {
+        for bad in ["file:///C:/Windows/System32/cmd.exe", "javascript:alert(1)", "calc.exe", "ms-settings:", r"C:\Windows\notepad.exe", ""] {
+            assert!(open_http(bad).is_err(), "{bad}");
+        }
     }
 }

@@ -409,7 +409,7 @@ mod tests {
         let caps: serde_json::Value = serde_json::from_str(include_str!("../../capabilities/default.json")).unwrap();
         let patterns: Vec<&str> = caps["windows"].as_array().unwrap().iter().filter_map(|w| w.as_str()).collect();
         let covered = |label: &str| patterns.iter().any(|p| p.strip_suffix('*').map_or(*p == label, |prefix| label.starts_with(prefix)));
-        for label in [label(7), crate::interface::popup::LABEL.to_string(), "bar-7".to_string(), "panel".to_string(), "focus-border".to_string(), "main".to_string()] {
+        for label in [label(7), crate::interface::popup::LABEL.to_string(), "bar-7".to_string(), "panel".to_string(), "search".to_string(), "focus-border".to_string(), "main".to_string()] {
             assert!(covered(&label), "falta «{label}» en capabilities/default.json");
         }
     }

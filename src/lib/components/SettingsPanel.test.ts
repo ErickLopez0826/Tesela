@@ -55,10 +55,24 @@ describe("SettingsPanel", () => {
     expect(invoke).toHaveBeenCalledWith("add_exclusion", expect.objectContaining({ exe: "overwatch.exe" }));
   });
 
-  it("solo tiene dos apartados: aplicaciones excluidas y general (ya no hay «Módulos instalados»)", async () => {
+  it("tiene tres apartados: aplicaciones excluidas, buscador y general (ya no hay «Módulos instalados»)", async () => {
     const { container } = render(SettingsPanel);
-    expect([...container.querySelectorAll("nav button")].map((b) => b.textContent?.trim())).toEqual(["Aplicaciones excluidas", "General"]);
+    expect([...container.querySelectorAll("nav button")].map((b) => b.textContent?.trim())).toEqual(["Aplicaciones excluidas", "Buscador", "General"]);
     expect(screen.queryByText("Módulos instalados")).toBeNull();
+  });
+
+  it("el apartado Buscador lee las redirecciones del núcleo", async () => {
+    // Solo se añaden los comandos del buscador: los stores de ventanas y exclusiones son compartidos entre pruebas.
+    const base = invoke.getMockImplementation()!;
+    invoke.mockImplementation((cmd: string, ...rest: unknown[]) => {
+      if (cmd === "search_redirects_get") return Promise.resolve([{ word: "claude", url: "https://claude.com", kind: "redirect" }]);
+      if (cmd === "search_history_len") return Promise.resolve(3);
+      return base(cmd, ...rest);
+    });
+    render(SettingsPanel);
+    await fireEvent.click(screen.getByRole("button", { name: "Buscador" }));
+    await waitFor(() => expect(screen.getByText("https://claude.com")).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Buscador" }).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("general trae la casilla de arranque y los botones de cerrar y reiniciar, y cerrar llega al núcleo", async () => {

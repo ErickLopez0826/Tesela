@@ -170,3 +170,50 @@ describe("listas de conectividad con muchas opciones", () => {
     expect(container.querySelector(".list")).toBeTruthy();
   });
 });
+
+describe("icono de Wi-Fi según la señal", () => {
+  /** Arcos del icono de Wi-Fi: [apagados, encendidos]. */
+  function arcs() {
+    const paths = [...document.querySelector(".tile .ico svg")!.querySelectorAll("path.arc")];
+    return { lit: paths.filter((p) => !p.classList.contains("dim")).length, dim: paths.filter((p) => p.classList.contains("dim")).length };
+  }
+  const wifi = (signal?: number | null, on = true): RadioState[] => [{ kind: "wifi", available: true, on, ...(signal === undefined ? {} : { signal }) }];
+  const tile = () => document.querySelector(".tile") as HTMLElement;
+
+  it("con buena señal se ven los tres arcos y con menos se van apagando", () => {
+    const seen = [5, 4, 3, 2, 1].map((bars) => {
+      const { unmount } = render(ConnectivitySection, { radios: wifi(bars), allowChanges: true, onSet: vi.fn() });
+      const lit = arcs().lit;
+      unmount();
+      return lit;
+    });
+    expect(seen).toEqual([3, 2, 2, 1, 1]);
+  });
+
+  it("encendido pero sin conexión solo queda el punto", () => {
+    render(ConnectivitySection, { radios: wifi(null), allowChanges: true, onSet: vi.fn() });
+    expect(arcs()).toEqual({ lit: 0, dim: 3 });
+    expect(tile().title).toBe("Sin conexión");
+  });
+
+  it("si el núcleo no informa de la señal el icono se ve completo y sin tooltip", () => {
+    render(ConnectivitySection, { radios: wifi(undefined), allowChanges: true, onSet: vi.fn() });
+    expect(arcs()).toEqual({ lit: 3, dim: 0 });
+    expect(tile().title).toBe("");
+  });
+
+  it("el tooltip dice cuántas barras hay y el icono sigue a la señal cuando cambia", async () => {
+    const { rerender } = render(ConnectivitySection, { radios: wifi(4), allowChanges: true, onSet: vi.fn() });
+    expect(tile().title).toBe("Señal: 4 de 5");
+    expect(arcs().lit).toBe(2);
+    await rerender({ radios: wifi(5), allowChanges: true, onSet: vi.fn() });
+    expect(arcs().lit).toBe(3);
+  });
+
+  it("con el Wi-Fi apagado no se muestra señal y las demás conexiones conservan su icono", () => {
+    render(ConnectivitySection, { radios: [...wifi(4, false), { kind: "bluetooth", available: true, on: true }], allowChanges: true, onSet: vi.fn() });
+    expect(arcs().lit).toBe(3);
+    expect(tile().title).toBe("");
+    expect(document.querySelectorAll(".tile")[1].querySelectorAll("path.arc").length).toBe(0);
+  });
+});

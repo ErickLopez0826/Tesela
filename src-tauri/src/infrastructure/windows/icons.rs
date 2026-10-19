@@ -178,6 +178,133 @@ pub fn exe_icon_png(path: &str) -> Option<Vec<u8>> {
     }
 }
 
+/// Icono del shell para un archivo que existe, leído del propio archivo (no el genérico de la extensión).
+fn shell_icon_png(path: &str) -> Option<Vec<u8>> {
+    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        let mut info = SHFILEINFOW::default();
+        let got = SHGetFileInfoW(PCWSTR(wide.as_ptr()), FILE_ATTRIBUTE_NORMAL, Some(&mut info), size_of::<SHFILEINFOW>() as u32, SHGFI_ICON | SHGFI_LARGEICON);
+        if got == 0 || info.hIcon.is_invalid() {
+            return None;
+        }
+        let png = icon_png(info.hIcon);
+        let _ = DestroyIcon(info.hIcon);
+        png
+    }
+}
+
+/// Sustituye `%VARIABLE%` por su valor (los accesos directos guardan rutas como `%SystemRoot%\system32\shell32.dll`).
+/// Lo que no se puede resolver se deja tal cual.
+fn expand_env(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        match after.find('%').and_then(|end| std::env::var(&after[..end]).ok().map(|v| (end, v))) {
+            Some((end, value)) => {
+                out.push_str(&value);
+                rest = &after[end + 1..];
+            }
+            None => {
+                out.push('%');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Lo que dice un acceso directo sobre su icono: el archivo y la posición que él mismo indica (si indica alguno) y el
+/// programa al que apunta.
+struct Shortcut {
+    icon_file: String,
+    icon_index: i32,
+    target: String,
+}
+
+fn utf16_to_string(buf: &[u16]) -> String {
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    String::from_utf16_lossy(&buf[..len])
+}
+
+fn read_shortcut(lnk: &str) -> Option<Shortcut> {
+    use windows::core::{Interface, HSTRING};
+    use windows::Win32::Storage::FileSystem::WIN32_FIND_DATAW;
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, STGM_READ};
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+    unsafe {
+        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let read = || -> Option<Shortcut> {
+            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+            link.cast::<IPersistFile>().ok()?.Load(&HSTRING::from(lnk), STGM_READ).ok()?;
+            let mut target = [0u16; 520];
+            link.GetPath(&mut target, std::ptr::null_mut::<WIN32_FIND_DATAW>(), 0).ok()?;
+            let mut icon = [0u16; 520];
+            let mut index = 0i32;
+            link.GetIconLocation(&mut icon, &mut index).ok()?;
+            Some(Shortcut { icon_file: expand_env(&utf16_to_string(&icon)), icon_index: index, target: utf16_to_string(&target) })
+        };
+        let shortcut = read();
+        if init.is_ok() {
+            CoUninitialize();
+        }
+        shortcut
+    }
+}
+
+/// Icono de un archivo concreto (`.exe`, `.dll`, `.ico`) en la posición indicada.
+fn extracted_icon_png(file: &str, index: i32) -> Option<Vec<u8>> {
+    use windows::Win32::UI::Shell::ExtractIconExW;
+    let wide: Vec<u16> = file.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        let mut large = HICON::default();
+        if ExtractIconExW(PCWSTR(wide.as_ptr()), index, Some(&mut large), None, 1) == 0 || large.is_invalid() {
+            return None;
+        }
+        let png = icon_png(large);
+        let _ = DestroyIcon(large);
+        png
+    }
+}
+
+/// Icono de un acceso directo SIN la flechita: el shell la dibuja sobre el icono del propio `.lnk`, así que se toma el icono
+/// al que apunta, igual que hace el menú Inicio. Es el que el acceso directo indica (`IconLocation`) o, si no indica ninguno,
+/// el del programa. Si no se consigue ninguno devuelve `None` (la vista pone una letra) antes que enseñar la flecha.
+fn shortcut_icon_png(lnk: &str) -> Option<Vec<u8>> {
+    let s = read_shortcut(lnk)?;
+    let own = std::path::Path::new(&s.icon_file);
+    if !s.icon_file.is_empty() && own.is_file() && !s.icon_file.to_lowercase().ends_with(".lnk") {
+        if let Some(png) = extracted_icon_png(&s.icon_file, s.icon_index) {
+            return Some(png);
+        }
+    }
+    (!s.target.is_empty()).then(|| shell_icon_png(&s.target)).flatten()
+}
+
+/// PNG del icono de un archivo que existe: un `.exe` o un acceso directo del menú Inicio (sin la flechita del acceso directo).
+/// A diferencia de `exe_icon_png`, no se queda con el icono genérico de la extensión.
+pub fn file_icon_png(path: &str) -> Option<Vec<u8>> {
+    if path.to_lowercase().ends_with(".lnk") {
+        return shortcut_icon_png(path);
+    }
+    shell_icon_png(path)
+}
+
+/// URL de datos con el icono de un archivo que existe (se calcula una vez por ruta).
+pub fn file_icon_url(path: &str) -> Option<String> {
+    let key = format!("file:{path}");
+    if let Some(hit) = CACHE.lock().unwrap().as_ref().and_then(|c| c.get(&key)) {
+        return hit.clone();
+    }
+    let url = file_icon_png(path).map(|bytes| format!("data:image/png;base64,{}", base64(&bytes)));
+    if url.is_some() {
+        CACHE.lock().unwrap().get_or_insert_with(HashMap::new).insert(key, url.clone());
+    }
+    url
+}
+
 /// URL de datos con el icono de un ejecutable (se calcula una vez por ruta).
 pub fn exe_icon_url(path: &str) -> Option<String> {
     let key = format!("exe:{path}");
@@ -209,6 +336,16 @@ pub fn app_icon_url(handle: isize, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn las_variables_de_entorno_de_la_ruta_de_un_icono_se_expanden() {
+        std::env::set_var("TESELA_PRUEBA_ICONO", r"C:\Carpeta");
+        assert_eq!(expand_env(r"%TESELA_PRUEBA_ICONO%\a.dll"), r"C:\Carpeta\a.dll");
+        assert_eq!(expand_env(r"%NO_EXISTE_ESTA_VARIABLE%\a"), r"%NO_EXISTE_ESTA_VARIABLE%\a", "lo que no se puede resolver queda igual");
+        assert_eq!(expand_env("100% seguro"), "100% seguro");
+        assert_eq!(expand_env(r"C:\sin\variables.ico"), r"C:\sin\variables.ico");
+        assert_eq!(expand_env(""), "");
+    }
 
     #[test]
     fn el_crc_y_el_adler_son_los_de_siempre() {

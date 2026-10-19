@@ -69,6 +69,9 @@ pub struct AppState {
     pub notes: crate::infrastructure::notes_store::NotesStore,
     /// `[system] wallpaper_transition`: dibujar la transición al cambiar de fondo.
     pub wallpaper_transition: bool,
+    /// Buscador de aplicaciones (§18): redirecciones, historial de uso y servicio de búsqueda.
+    #[cfg(windows)]
+    pub search: Arc<crate::interface::search::SearchState>,
     #[cfg(windows)]
     pub manager: Mutex<Option<crate::infrastructure::windows::runtime::Runtime>>,
     #[cfg(not(windows))]
@@ -94,6 +97,8 @@ impl AppState {
             allow_changes,
             wallpapers_dir: crate::infrastructure::config_file::config_dir().join("wallpapers"),
             wallpaper_transition: true,
+            #[cfg(windows)]
+            search: Arc::new(crate::interface::search::SearchState::default()),
             notes: crate::infrastructure::notes_store::NotesStore::load(crate::infrastructure::notes_store::NotesStore::default_path()),
             last_state,
             stats: Mutex::new(Box::new(crate::infrastructure::stats::SysinfoStats::new())),
@@ -243,6 +248,7 @@ pub async fn glass_image(
             blocking(move || Ok(backdrop::bar_image(&label, rect, blur, scale, refresh))).await
         }
         "panel" => blocking(move || Ok(backdrop::panel_image(blur, scale, refresh))).await,
+        "search" => blocking(move || Ok(backdrop::search_image(blur, scale, refresh))).await,
         other => Err(format!("fondo desconocido: {other}")),
     }
 }
@@ -440,6 +446,82 @@ pub fn popup_close(app: tauri::AppHandle) {
 #[tauri::command]
 pub fn popup_resize(app: tauri::AppHandle, width: f64, height: f64) {
     crate::interface::popup::resize(&app, width, height);
+}
+
+// ----- Buscador de aplicaciones (§18) -----
+//
+// La interfaz nunca manda rutas ni direcciones: manda el identificador de un resultado que el propio núcleo acaba de
+// ofrecer (§18.10). Si no lo reconoce, no se hace nada.
+
+/// Busca mientras se escribe. Con el cuadro vacío devuelve las aplicaciones más usadas.
+#[cfg(windows)]
+#[tauri::command]
+pub async fn search_query(state: State<'_, AppState>, text: String) -> Result<Vec<crate::domain::search::SearchItem>, String> {
+    let search = state.search.clone();
+    blocking(move || Ok(search.query(&text))).await
+}
+
+/// Abre un resultado (Enter) o lo abre como administrador (ctrl+Enter) y cierra el buscador.
+#[cfg(windows)]
+#[tauri::command]
+pub async fn search_open(app: tauri::AppHandle, state: State<'_, AppState>, id: String, as_admin: bool) -> Result<(), String> {
+    let search = state.search.clone();
+    let opened = blocking(move || search.open(&id, as_admin)).await?;
+    if opened {
+        // Lo abierto toma el foco: no se le devuelve a la ventana anterior.
+        crate::interface::search::close(&app, false);
+    }
+    Ok(())
+}
+
+/// Cierra el buscador (Escape) devolviendo el foco a la ventana que lo tenía.
+#[cfg(windows)]
+#[tauri::command]
+pub fn search_close(app: tauri::AppHandle) {
+    crate::interface::search::close(&app, true);
+}
+
+/// La vista pide el alto (lógico) que necesita su contenido.
+#[cfg(windows)]
+#[tauri::command]
+pub fn search_resize(app: tauri::AppHandle, height: f64) {
+    crate::interface::search::resize(&app, height);
+}
+
+/// Icono (PNG en una URL de datos) de un resultado que es un programa.
+#[cfg(windows)]
+#[tauri::command]
+pub async fn search_icon(state: State<'_, AppState>, id: String) -> Result<Option<String>, String> {
+    let search = state.search.clone();
+    blocking(move || Ok(search.icon(&id))).await
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub fn search_redirects_get(state: State<'_, AppState>) -> Vec<crate::domain::search::Redirect> {
+    state.search.redirects()
+}
+
+/// Guarda la lista completa de redirecciones y búsquedas web; devuelve la lista ya validada.
+#[cfg(windows)]
+#[tauri::command]
+pub fn search_redirects_set(state: State<'_, AppState>, list: Vec<crate::domain::search::Redirect>) -> Result<Vec<crate::domain::search::Redirect>, String> {
+    state.search.set_redirects(list)
+}
+
+/// Borra el historial de uso del buscador. Devuelve cuántas entradas quedan (cero).
+#[cfg(windows)]
+#[tauri::command]
+pub fn search_history_clear(state: State<'_, AppState>) -> Result<usize, String> {
+    state.search.clear_history()?;
+    Ok(state.search.history_len())
+}
+
+/// Cuántas cosas recuerda el historial de uso del buscador.
+#[cfg(windows)]
+#[tauri::command]
+pub fn search_history_len(state: State<'_, AppState>) -> usize {
+    state.search.history_len()
 }
 
 /// Respaldo de la tecla Windows desde el panel (ver `winkey::page_key`).

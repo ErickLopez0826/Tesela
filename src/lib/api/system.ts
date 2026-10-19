@@ -67,6 +67,8 @@ export interface RadioState {
   kind: RadioKindName;
   available: boolean;
   on: boolean;
+  /** Solo el Wi-Fi: barras de señal (0 a 5) de la red conectada, o `null` si está encendido sin conexión. */
+  signal?: number | null;
 }
 
 export interface WifiNetwork {

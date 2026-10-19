@@ -45,6 +45,8 @@ pub trait WindowPlatform {
     fn publish_state(&mut self, state: &StateSnapshot);
     /// Abre o cierra el panel desplegable en el monitor indicado (§9.2).
     fn toggle_panel(&mut self, monitor: u32);
+    /// Abre o cierra el buscador de aplicaciones en el monitor bajo el cursor (§18).
+    fn toggle_search(&mut self) {}
     /// Avisa al usuario (registro y, si hay interfaz, un aviso en pantalla).
     fn notify(&mut self, text: &str);
     /// Anima el cambio de workspace (las ventanas que salen suben, las que entran bajan). Vuelve cuando la animación

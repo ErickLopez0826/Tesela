@@ -248,9 +248,9 @@ impl Keymap {
         self.modes.get(mode)?.iter().find(|(c, _)| c == chord).map(|(_, a)| *a)
     }
 
-    /// Los atajos que siguen activos mientras el gestor está en pausa.
+    /// Los atajos que siguen activos mientras el gestor está en pausa: el de pausa y el del buscador (no toca ventanas).
     pub fn pause_bindings(&self) -> Vec<(Chord, Action)> {
-        self.global().iter().filter(|(_, a)| *a == Action::TogglePause).copied().collect()
+        self.global().iter().filter(|(_, a)| matches!(a, Action::TogglePause | Action::ToggleSearch)).copied().collect()
     }
 }
 
@@ -320,8 +320,10 @@ mod tests {
     }
 
     #[test]
-    fn solo_el_atajo_de_pausa_sigue_activo_en_pausa() {
+    fn solo_los_atajos_de_pausa_y_buscador_siguen_activos_en_pausa() {
         let km = Keymap::build(&[spec("toggle_pause", &["alt+shift+p"], None), spec("focus_left", &["alt+h"], None)]).unwrap();
         assert_eq!(km.pause_bindings().len(), 1);
+        let km = Keymap::build(&[spec("toggle_pause", &["alt+shift+p"], None), spec("toggle_search", &["ctrl+shift+space"], None), spec("focus_left", &["alt+h"], None)]).unwrap();
+        assert_eq!(km.pause_bindings().len(), 2);
     }
 }

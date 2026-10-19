@@ -19,6 +19,7 @@ Verificación previa (estado inicial): PROGRESS.md no existía; solo estaba hech
 | 8 Módulos de utilidad | Cada módulo funciona como módulo instalable | ✅ cumplido; la prueba de velocidad usa datos de ejemplo hasta que instales el CLI de Ookla (B-9) |
 | 9 Módulo de pareja | Dos instancias se envían mensajes con delay razonable | 🟡 **preparada, criterio NO cumplido entre equipos reales**: sin backend (necesita tu proyecto de Supabase, B-10); cumplido solo con el canal simulado |
 | 10 Instalación | La app arranca sola, se instala con un solo archivo y se actualiza | 🟡 **preparada, criterio NO cumplido**: el arranque con Windows existe y está probado (clave de pruebas); el instalador está configurado pero **no generado**; las actualizaciones **no están conectadas** (B-11) |
+| 11 Buscador de aplicaciones (2.0.0) | Erick puede desinstalar Flow Launcher y hacer con Tesela todo lo que hacía con él (§18.12) | 🟡 **código y pruebas hechos; falta tu prueba de uso real** (ver abajo) |
 
 ### Cómo ejecutar todas las pruebas
 ```
@@ -119,3 +120,13 @@ Cómo ejecutar la prueba real: `cargo test --test phase1_windows -- --ignored --
 - ⬜ **Instalador no generado** (`npm run tauri build` descarga NSIS: no lo ejecuté sin pedírtelo).
 - ⬜ **Actualizaciones no conectadas**: código listo tras `--features updater` (compila), falta clave de firma y servidor de versiones.
 - Guía completa en `docs/instalacion-y-actualizaciones.md`.
+
+## Fase 11: Buscador de aplicaciones (2.0.0) 🟡 (código y pruebas hechos; falta tu prueba de uso real)
+- ✅ **Dominio** (`domain/search.rs`): redirecciones y búsquedas web (solo `http(s)`, `{q}` solo en búsquedas y nunca en el servidor), codificación de lo escrito, coincidencia en tres niveles, uso reciente con envejecimiento (vida media de 30 días) y orden.
+- ✅ **Aplicación** (`application/search.rs`): `SearchService` con identificadores opacos; abrir enfoca si está abierta, lanza si no, `ctrl+Enter` pide elevación; un identificador desconocido no hace nada.
+- ✅ **Infraestructura**: `search.json` y `search-usage.json` (archivo dañado no rompe nada), `launch_elevated` (`runas`, cancelar el aviso no es error), `open_http`, iconos leídos del archivo real, cristal propio del buscador.
+- ✅ **Atajo** `ctrl+shift+espacio` (`toggle_search`): también con el gestor en pausa; se añade solo al `config.toml` que ya tenías.
+- ✅ **Ventana y vista**: ventana `search` precreada y dormida, mismo cristal y animaciones que el panel, respaldo de la tecla Windows; sección **Ajustes → Buscador**.
+- ✅ Pruebas: 416 unitarias de Rust y 370 de la interfaz pasan (nuevas: dominio, aplicación con host falso, almacenes, migración de `config.toml`, `SearchView`, `SearchSettings`); 3 en vivo (`tests/live_search.rs`): el atajo real llega a la ventana también en pausa, el escáner real encuentra aplicaciones y el icono sale del archivo.
+- ⬜ **Sin verificar con la app real abierta** (no se arrancó Tesela completa para no tocar tus ventanas): aspecto del cristal y las animaciones, que el cuadro de texto reciba el foco al abrir, que la tecla Windows siga siendo de Tesela con el buscador abierto, el aviso de control de cuentas con `ctrl+Enter`, y que abrir una app ya abierta cambie de workspace. Lista de comprobación en el resumen de la entrega; el criterio de §18.12 (desinstalar Flow Launcher) lo decides tú tras usarlo.
+- Fuera de lo pedido: aplicaciones de la Tienda de Microsoft (UWP) no salen en los resultados (decisión de Erick).

@@ -43,6 +43,20 @@ impl WinRtRadios {
         }
     }
 
+    /// Barras de señal (0 a 5) de la red Wi-Fi a la que está conectado el equipo; `None` si no hay ninguna conectada.
+    /// Se lee del perfil de conexión del sistema (no escanea redes: es instantáneo).
+    fn wifi_bars() -> Option<u8> {
+        use windows::Networking::Connectivity::NetworkConnectivityLevel;
+        Self::init();
+        NetworkInformation::GetConnectionProfiles()
+            .ok()?
+            .into_iter()
+            .filter(|p| p.IsWlanConnectionProfile().unwrap_or(false))
+            .filter(|p| p.GetNetworkConnectivityLevel().is_ok_and(|l| l != NetworkConnectivityLevel::None))
+            .filter_map(|p| p.GetSignalBars().ok()?.Value().ok())
+            .max()
+    }
+
     fn tethering() -> Option<NetworkOperatorTetheringManager> {
         Self::init();
         let profile = NetworkInformation::GetInternetConnectionProfile().ok()?;
@@ -67,16 +81,20 @@ impl RadioControl for WinRtRadios {
         let mut out = Vec::new();
         for kind in [RadioKind::Wifi, RadioKind::Bluetooth] {
             let radio = radios.iter().find(|r| Self::matches(kind, r));
+            let on = radio.and_then(|r| r.State().ok()) == Some(WinRadioState::On);
             out.push(RadioState {
                 kind,
                 available: radio.is_some(),
-                on: radio.and_then(|r| r.State().ok()) == Some(WinRadioState::On),
+                on,
+                // La señal solo se pregunta con el Wi-Fi encendido: apagado no hay conexión que medir.
+                signal: if kind == RadioKind::Wifi && on { Self::wifi_bars() } else { None },
             });
         }
         let hotspot = Self::tethering();
         out.push(RadioState {
             kind: RadioKind::Hotspot,
             available: hotspot.is_some(),
+            signal: None,
             on: hotspot
                 .and_then(|m| m.TetheringOperationalState().ok())
                 .is_some_and(|s| s == TetheringOperationalState::On),
@@ -130,5 +148,11 @@ mod tests {
         assert_eq!(states[1].kind, RadioKind::Bluetooth);
         assert_eq!(states[2].kind, RadioKind::Hotspot);
         assert!(states.iter().all(|s| s.available || !s.on), "algo no disponible no puede estar encendido");
+        // La señal solo existe para el Wi-Fi encendido, y va de 0 a 5 barras.
+        assert!(states[1..].iter().all(|s| s.signal.is_none()));
+        if !states[0].on {
+            assert_eq!(states[0].signal, None);
+        }
+        assert!(states[0].signal.is_none_or(|bars| bars <= 5), "barras fuera de rango: {:?}", states[0].signal);
     }
 }

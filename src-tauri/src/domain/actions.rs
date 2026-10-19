@@ -31,6 +31,8 @@ pub enum Action {
     TogglePause,
     /// Abre o cierra el panel desplegable (§9.2).
     TogglePanel,
+    /// Abre o cierra el buscador de aplicaciones (§18).
+    ToggleSearch,
     ReloadConfig,
     Redraw,
     Exit,
@@ -71,6 +73,7 @@ impl Action {
             OpenTerminal => "open_terminal".into(),
             TogglePause => "toggle_pause".into(),
             TogglePanel => "toggle_panel".into(),
+            ToggleSearch => "toggle_search".into(),
             ReloadConfig => "reload_config".into(),
             Redraw => "redraw".into(),
             Exit => "exit".into(),
@@ -124,6 +127,7 @@ impl Action {
             "open_terminal" => OpenTerminal,
             "toggle_pause" => TogglePause,
             "toggle_panel" => TogglePanel,
+            "toggle_search" => ToggleSearch,
             "reload_config" => ReloadConfig,
             "redraw" => Redraw,
             "exit" => Exit,
@@ -161,6 +165,7 @@ mod tests {
             Action::OpenTerminal,
             Action::TogglePause,
             Action::TogglePanel,
+            Action::ToggleSearch,
             Action::ReloadConfig,
             Action::Redraw,
             Action::Exit,

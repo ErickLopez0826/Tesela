@@ -314,7 +314,17 @@ impl<P: WindowPlatform> Controller<P> {
         } else {
             self.keymap.global().to_vec()
         };
-        let failed = self.platform.set_hotkeys(&bindings);
+        let mut failed = self.platform.set_hotkeys(&bindings);
+        // El del buscador se explica aparte: es el más probable que choque con otro programa y se cambia en el archivo.
+        let search_chords: Vec<String> = bindings.iter().filter(|(_, a)| *a == Action::ToggleSearch).map(|(c, _)| c.to_string()).collect();
+        let search_failed: Vec<String> = failed.iter().filter(|c| search_chords.contains(c)).cloned().collect();
+        failed.retain(|c| !search_failed.contains(c));
+        if !search_failed.is_empty() {
+            self.platform.notify(&format!(
+                "El atajo del buscador ({}) ya lo usa otro programa. Cámbialo en config.toml (acción «toggle_search») y recarga con alt+shift+r.",
+                search_failed.join(", ")
+            ));
+        }
         if !failed.is_empty() {
             self.platform.notify(&format!("No se pudieron registrar estos atajos (¿otro programa los usa?): {}", failed.join(", ")));
         }
@@ -380,6 +390,7 @@ impl<P: WindowPlatform> Controller<P> {
                 let monitor = self.desk.active_monitor();
                 self.platform.toggle_panel(monitor);
             }
+            Action::ToggleSearch => self.platform.toggle_search(),
             Action::Exit => {
                 self.exit_requested = true;
             }
@@ -403,6 +414,8 @@ impl<P: WindowPlatform> Controller<P> {
                 return false;
             }
             Message::Action(Action::TogglePause) => self.set_paused(!self.paused),
+            // El buscador no toca ventanas: también funciona con el gestor en pausa.
+            Message::Action(Action::ToggleSearch) => self.platform.toggle_search(),
             Message::Action(Action::Exit) => {
                 self.platform.restore_all();
                 let _ = self.platform.set_hotkeys(&[]);
@@ -513,6 +526,8 @@ pub mod fake {
         pub bar_log: Vec<(u32, bool)>,
         pub states: Vec<StateSnapshot>,
         pub panel_log: Vec<u32>,
+        /// Cuántas veces se pidió abrir o cerrar el buscador.
+        pub search_toggles: u32,
         pub minimize_log: Vec<WindowId>,
         /// Combinaciones que el sistema "rechaza" al registrar (simula otro programa que las usa).
         pub reject: Vec<String>,
@@ -538,6 +553,7 @@ pub mod fake {
                 bar_log: vec![],
                 states: vec![],
                 panel_log: vec![],
+                search_toggles: 0,
                 minimize_log: vec![],
                 reject: vec![],
                 deny_move: vec![],
@@ -634,6 +650,9 @@ pub mod fake {
         }
         fn toggle_panel(&mut self, monitor: u32) {
             self.panel_log.push(monitor);
+        }
+        fn toggle_search(&mut self) {
+            self.search_toggles += 1;
         }
         fn notify(&mut self, text: &str) {
             self.notices.push(text.to_string());
@@ -995,7 +1014,7 @@ mod tests {
         let mut wins: Vec<_> = c.platform().windows.iter().map(|(id, w)| (*id, w.rect, w.hidden)).collect();
         wins.sort_by_key(|w| w.0);
         format!(
-            "{wins:?}|ws={}|focus={:?}|closed={:?}|min={:?}|term={}|notices={}|paused={}|mode={:?}|applies={}|exit={}|panel={:?}",
+            "{wins:?}|ws={}|focus={:?}|closed={:?}|min={:?}|term={}|notices={}|paused={}|mode={:?}|applies={}|exit={}|panel={:?}|search={}",
             c.desktop().active_workspace(),
             c.platform().focus_log,
             c.platform().closed,
@@ -1007,6 +1026,7 @@ mod tests {
             c.platform().apply_count,
             c.exit_requested(),
             c.platform().panel_log,
+            c.platform().search_toggles,
         )
     }
 
@@ -1389,6 +1409,30 @@ mod tests {
         let mut c = ctl_cfg(1, &cfg);
         assert!(press(&mut c, "alt+b"));
         assert_eq!(c.platform().panel_log, vec![0]);
+    }
+
+    #[test]
+    fn el_atajo_del_buscador_lo_abre_y_sigue_activo_con_el_gestor_en_pausa() {
+        let cfg = config_with(&[("toggle_search", &["ctrl+shift+space"], None), ("toggle_pause", &["alt+shift+p"], None), ("toggle_panel", &["alt+b"], None)]);
+        let mut c = ctl_cfg(1, &cfg);
+        assert!(press(&mut c, "ctrl+shift+space"));
+        assert_eq!(c.platform().search_toggles, 1);
+        act(&mut c, Action::TogglePause);
+        assert!(press(&mut c, "ctrl+shift+space"), "el buscador no toca ventanas: sirve en pausa");
+        assert_eq!(c.platform().search_toggles, 2);
+        assert!(!press(&mut c, "alt+b"), "el resto de atajos sí se desactiva");
+    }
+
+    #[test]
+    fn si_el_atajo_del_buscador_esta_ocupado_el_aviso_explica_como_cambiarlo() {
+        let cfg = config_with(&[("toggle_search", &["ctrl+shift+space"], None), ("toggle_panel", &["alt+b"], None)]);
+        let valid = cfg.validate().unwrap();
+        let mut p = FakePlatform::new();
+        p.reject = vec!["ctrl+shift+space".into(), "alt+b".into()];
+        let c = Controller::with_config(p, Scope::TitlePrefix("WMTEST".into()), valid.settings, valid.keymap);
+        let notices = &c.platform().notices;
+        assert!(notices.iter().any(|n| n.contains("buscador") && n.contains("toggle_search") && n.contains("ctrl+shift+space")), "{notices:?}");
+        assert!(notices.iter().any(|n| n.contains("alt+b") && !n.contains("ctrl+shift+space")), "los demás se avisan aparte: {notices:?}");
     }
 
     #[test]

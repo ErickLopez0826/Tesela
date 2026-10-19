@@ -41,6 +41,49 @@ pub fn load_file() -> Result<ValidConfig, Vec<String>> {
     parse_config(&text)
 }
 
+/// Bloque que se añade al `config.toml` de quien ya lo tenía antes de que existiera el buscador (§18): el archivo por
+/// defecto solo se escribe si no existe, así que sin esto el atajo nuevo nunca le llegaría.
+const SEARCH_BINDING_BLOCK: &str = r#"
+# Buscador de aplicaciones (§18): abre y cierra la ventana de búsqueda. Sigue activo con el gestor en pausa.
+# Si otro programa ya usa esta combinación, cámbiala aquí y recarga con alt+shift+r.
+# Para desactivarlo, deja la lista vacía: keys = []
+[[keybinding]]
+action = "toggle_search"
+keys = ["ctrl+shift+space"]
+"#;
+
+/// Si el archivo es válido y no tiene aún ninguna acción `toggle_search`, devuelve su texto con el atajo del buscador
+/// añadido al final (sin tocar nada más). Si la combinación ya la usa otra acción, o el archivo no se entiende, no hace nada.
+pub fn with_search_binding(text: &str) -> Option<String> {
+    if text.contains("toggle_search") {
+        return None;
+    }
+    let valid = parse_config(text).ok()?;
+    let chord = crate::domain::shortcuts::Chord::parse("ctrl+shift+space").expect("combinación válida");
+    if valid.keymap.lookup("", &chord).is_some() {
+        return None;
+    }
+    let mut out = text.to_string();
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(SEARCH_BINDING_BLOCK);
+    Some(out)
+}
+
+/// Pone al día un `config.toml` existente con las novedades que necesitan una entrada nueva. Devuelve `true` si lo cambió.
+fn migrate_file(path: &std::path::Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(path) else { return false };
+    match with_search_binding(&text) {
+        Some(new) => {
+            // Se escribe a un temporal y se renombra: un corte a mitad no deja el archivo del usuario a medias.
+            let tmp = path.with_extension("toml.tmp");
+            std::fs::write(&tmp, new).is_ok() && std::fs::rename(&tmp, path).is_ok()
+        }
+        None => false,
+    }
+}
+
 /// Arranque: crea el archivo con los valores por defecto si no existe y lo carga.
 /// Si el archivo es inválido usa los valores por defecto y devuelve el aviso.
 pub fn load_or_create() -> (ValidConfig, Option<String>) {
@@ -50,6 +93,8 @@ pub fn load_or_create() -> (ValidConfig, Option<String>) {
             let _ = std::fs::create_dir_all(dir);
         }
         let _ = std::fs::write(&path, DEFAULT_CONFIG);
+    } else if migrate_file(&path) {
+        eprintln!("[wm] se añadió al config.toml el atajo del buscador (ctrl+shift+space)");
     }
     match load_file() {
         Ok(v) => (v, None),
@@ -159,8 +204,10 @@ mod tests {
         add("alt+shift+e", Exit);
         // Fuera de §8: el plan pide abrir el panel "con un clic o un atajo" sin definir la tecla (D-33).
         add("alt+b", TogglePanel);
+        // Fuera de §8: el buscador de aplicaciones (§18.2).
+        add("ctrl+shift+space", ToggleSearch);
 
-        assert_eq!(v.keymap.global().len(), expected.len(), "ni más ni menos atajos globales que la sección 8 (+ el del panel)");
+        assert_eq!(v.keymap.global().len(), expected.len(), "ni más ni menos atajos globales que la sección 8 (+ panel y buscador)");
         for (chord, action) in &expected {
             has(&v, "", chord, *action);
         }
@@ -198,6 +245,75 @@ mod tests {
         assert_eq!(out("steam.exe", "Steam"), RuleOutcome { workspace: Some(1), float: true });
         assert_eq!(out("javaw.exe", "Minecraft"), RuleOutcome { workspace: None, float: true });
         assert_eq!(out("notepad.exe", "x"), RuleOutcome::default());
+    }
+
+    /// El `config.toml` de quien lo creó antes del buscador: sin la acción `toggle_search`.
+    fn old_config() -> String {
+        let mut text = String::new();
+        let mut skip = 0;
+        for line in DEFAULT_CONFIG.lines() {
+            if line.contains("Buscador de aplicaciones") {
+                skip = 6;
+            }
+            if skip > 0 {
+                skip -= 1;
+                continue;
+            }
+            text.push_str(line);
+            text.push('\n');
+        }
+        text
+    }
+
+    #[test]
+    fn la_config_antigua_de_prueba_no_tiene_el_buscador() {
+        let old = old_config();
+        assert!(!old.contains("toggle_search"));
+        assert!(parse_config(&old).is_ok());
+    }
+
+    #[test]
+    fn a_una_config_sin_buscador_se_le_anade_el_atajo_y_nada_mas() {
+        let old = old_config();
+        let new = with_search_binding(&old).expect("se añade");
+        assert!(new.starts_with(&old), "lo anterior queda intacto");
+        has(&parse_config(&new).unwrap(), "", "ctrl+shift+space", Action::ToggleSearch);
+        assert_eq!(parse_config(&new).unwrap().keymap.global().len(), parse_config(&old).unwrap().keymap.global().len() + 1);
+    }
+
+    #[test]
+    fn la_migracion_se_hace_una_sola_vez_y_respeta_lo_que_el_usuario_decidio() {
+        let new = with_search_binding(&old_config()).unwrap();
+        assert_eq!(with_search_binding(&new), None, "ya la tiene");
+        // Si lo desactivó con la lista vacía, sigue desactivado.
+        let disabled = old_config() + "[[keybinding]]\naction = \"toggle_search\"\nkeys = []\n";
+        assert_eq!(with_search_binding(&disabled), None);
+        // Si la combinación la usa otra acción suya, no se le quita.
+        let taken = old_config().replace("alt+b", "ctrl+shift+space");
+        assert_eq!(with_search_binding(&taken), None);
+        // Un archivo que no se entiende no se toca.
+        assert_eq!(with_search_binding("esto no es toml [["), None);
+    }
+
+    #[test]
+    fn sin_salto_de_linea_final_el_bloque_no_se_pega_a_la_ultima_linea() {
+        let old = old_config();
+        let new = with_search_binding(old.trim_end()).unwrap();
+        assert!(parse_config(&new).is_ok(), "{new}");
+    }
+
+    #[test]
+    fn migrar_el_archivo_lo_reescribe_una_vez() {
+        let dir = std::env::temp_dir().join(format!("tesela-cfg-migra-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, old_config()).unwrap();
+        assert!(migrate_file(&path));
+        assert!(std::fs::read_to_string(&path).unwrap().contains("toggle_search"));
+        assert!(!dir.join("config.toml.tmp").exists());
+        assert!(!migrate_file(&path), "la segunda vez no cambia nada");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

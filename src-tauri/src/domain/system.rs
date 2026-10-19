@@ -89,6 +89,8 @@ pub struct RadioState {
     pub kind: RadioKind,
     pub available: bool,
     pub on: bool,
+    /// Intensidad de la señal, de 0 a 5 barras: solo el Wi-Fi y solo si está conectado a una red. `None` en lo demás.
+    pub signal: Option<u8>,
 }
 
 /// Red Wi-Fi a la vista (una por nombre, con la mejor señal).

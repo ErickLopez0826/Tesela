@@ -157,6 +157,13 @@ pub fn run() {
                 last_state.clone(),
             );
             state.wallpaper_transition = config.system.wallpaper_transition;
+            // El buscador enfoca ventanas por el mismo enlace que los módulos: cambia de workspace si hace falta.
+            #[cfg(windows)]
+            {
+                state.search = std::sync::Arc::new(interface::search::SearchState::new(Box::new(
+                    infrastructure::windows::system::search_host::Win32SearchHost::new(focus_sink.clone()),
+                )));
+            }
             state.general = interface::commands::GeneralInfo { managing: args.manage.is_some(), bar: args.bar };
             if let Some(id) = &args.selftest_module {
                 state.selftest = Some(interface::commands::SelfTest {
@@ -182,6 +189,15 @@ pub fn run() {
             interface::commands::open_panel,
             interface::commands::close_panel,
             interface::commands::glass_image,
+            interface::commands::search_query,
+            interface::commands::search_open,
+            interface::commands::search_close,
+            interface::commands::search_resize,
+            interface::commands::search_icon,
+            interface::commands::search_redirects_get,
+            interface::commands::search_redirects_set,
+            interface::commands::search_history_clear,
+            interface::commands::search_history_len,
             interface::commands::tasks_list,
             interface::commands::tasks_save,
             interface::commands::startup_list,
@@ -360,6 +376,11 @@ fn setup_windows(
         interface::focus_border::start(&handle);
     }
 
+    // El buscador (ctrl+shift+espacio) llega por los atajos del gestor: su ventana se deja lista, oculta y dormida.
+    if args.manage.is_some() {
+        interface::search::prepare(&handle);
+    }
+
     // Las aplicaciones de arranque se abren con Tesela (salvo tras un reinicio desde Ajustes, que ya las dejó abiertas).
     let startup_apps = if args.no_startup_apps { Vec::new() } else { infrastructure::startup_store::load(&infrastructure::startup_store::default_path()) };
     let Some(scope) = args.manage.clone() else {
@@ -399,6 +420,10 @@ fn setup_windows(
         panel: {
             let h = handle.clone();
             Arc::new(move |monitor: u32| interface::bar::toggle_panel(&h, monitor))
+        },
+        search: {
+            let h = handle.clone();
+            Arc::new(move || interface::search::toggle_search(&h))
         },
     };
     if let Some(w) = warning {
