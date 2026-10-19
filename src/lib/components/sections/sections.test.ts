@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RadioState, SystemOverview } from "../../api/system";
 import ConnectivitySection from "./ConnectivitySection.svelte";
 import MediaSection from "./MediaSection.svelte";
-import PowerSection from "./PowerSection.svelte";
 import StatsSection from "./StatsSection.svelte";
 import WallpaperSection from "./WallpaperSection.svelte";
 
@@ -136,55 +135,6 @@ describe("StatsSection", () => {
   it("sin datos todavía", () => {
     render(StatsSection, { overview: null });
     expect(screen.getByText("Leyendo…")).toBeTruthy();
-  });
-});
-
-describe("PowerSection", () => {
-  it("pide confirmación antes de ejecutar y muestra que fue simulado", async () => {
-    const onRun = vi.fn().mockResolvedValue({ simulated: true, description: "Simulado: se habría pedido apagar el equipo" });
-    render(PowerSection, { allowChanges: false, onRun });
-    expect(screen.getByText("modo seguro: simulado")).toBeTruthy();
-    await fireEvent.click(screen.getByText("Apagar"));
-    expect(onRun).not.toHaveBeenCalled();
-    expect(screen.getByText(/¿Apagar el equipo\?/)).toBeTruthy();
-    await fireEvent.click(screen.getByText("Sí"));
-    expect(onRun).toHaveBeenCalledWith("shutdown");
-    await waitFor(() => expect(screen.getByText("Simulado: se habría pedido apagar el equipo")).toBeTruthy());
-  });
-
-  it("la confirmación centra la pregunta y usa botones grandes", async () => {
-    const { container } = render(PowerSection, { allowChanges: true, onRun: vi.fn() });
-    await fireEvent.click(screen.getByText("Hibernar"));
-    expect(container.querySelector(".ask .question")?.textContent).toContain("¿Hibernar el equipo?");
-    const buttons = [...container.querySelectorAll(".answers button")];
-    expect(buttons.map((b) => b.textContent?.trim())).toEqual(["Sí", "Cancelar"]);
-    expect(buttons.every((b) => b.classList.contains("big"))).toBe(true);
-  });
-
-  it("cancelar no ejecuta nada", async () => {
-    const onRun = vi.fn();
-    render(PowerSection, { allowChanges: false, onRun });
-    await fireEvent.click(screen.getByText("Reiniciar"));
-    await fireEvent.click(screen.getByText("Cancelar"));
-    expect(onRun).not.toHaveBeenCalled();
-    expect(screen.getByText("Hibernar")).toBeTruthy();
-  });
-
-  it("las cuatro acciones existen y con permiso no muestra el aviso de modo seguro", async () => {
-    const onRun = vi.fn().mockResolvedValue({ simulated: false, description: "Pedido: suspender el equipo" });
-    render(PowerSection, { allowChanges: true, onRun });
-    expect(screen.queryByText("modo seguro: simulado")).toBeNull();
-    for (const label of ["Apagar", "Suspender", "Reiniciar", "Hibernar"]) expect(screen.getByText(label)).toBeTruthy();
-    await fireEvent.click(screen.getByText("Suspender"));
-    await fireEvent.click(screen.getByText("Sí"));
-    expect(onRun).toHaveBeenCalledWith("suspend");
-  });
-
-  it("muestra el error si la acción falla", async () => {
-    render(PowerSection, { allowChanges: true, onRun: vi.fn().mockRejectedValue("Windows rechazó la suspensión") });
-    await fireEvent.click(screen.getByText("Suspender"));
-    await fireEvent.click(screen.getByText("Sí"));
-    await waitFor(() => expect(screen.getByText("Windows rechazó la suspensión")).toBeTruthy());
   });
 });
 

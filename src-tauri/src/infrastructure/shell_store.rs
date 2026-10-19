@@ -47,7 +47,7 @@ mod tests {
     #[test]
     fn lo_guardado_se_lee_igual() {
         let p = temp("guardar");
-        let s = ShellSettings { replace_taskbar: false, win_key_panel: false };
+        let s = ShellSettings { replace_taskbar: false, win_key_panel: false, show_background: false };
         save(&p, s).unwrap();
         assert_eq!(load(&p), s);
         let _ = std::fs::remove_dir_all(p.parent().unwrap());

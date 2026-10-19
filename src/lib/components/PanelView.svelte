@@ -5,7 +5,6 @@
     ActionOutcome,
     MediaCommandName,
     MediaInfo,
-    PowerActionName,
     RadioKindName,
     RadioState,
     AudioApi,
@@ -32,7 +31,6 @@
   import EngineWallpapers from "./sections/EngineWallpapers.svelte";
   import NotesSection from "./sections/NotesSection.svelte";
   import MediaSection from "./sections/MediaSection.svelte";
-  import PowerSection from "./sections/PowerSection.svelte";
   import StatsSection from "./sections/StatsSection.svelte";
   import TasksSection from "./sections/TasksSection.svelte";
   import WallpaperSection from "./sections/WallpaperSection.svelte";
@@ -63,7 +61,6 @@
     onVolume,
     onMute,
     onRadio,
-    onPower,
     onWallpaper,
   }: {
     now: Date;
@@ -99,7 +96,6 @@
     onVolume: (percent: number) => void;
     onMute: (muted: boolean) => void;
     onRadio: (kind: RadioKindName, on: boolean) => Promise<ActionOutcome>;
-    onPower: (action: PowerActionName) => Promise<ActionOutcome>;
     onWallpaper: (name: string) => Promise<ActionOutcome>;
   } = $props();
 
@@ -125,14 +121,13 @@
     }
   });
 
-  type TabId = "today" | "controls" | "stats" | "notes" | "modules" | "wallpaper" | "power" | "appearance" | "settings";
+  type TabId = "today" | "controls" | "stats" | "notes" | "modules" | "wallpaper" | "appearance" | "settings";
   const TABS: { id: TabId; label: string }[] = [
     { id: "controls", label: "Controles" },
     { id: "today", label: "Hoy" },
     { id: "stats", label: "Estadísticas" },
     { id: "notes", label: "Notas" },
     { id: "wallpaper", label: "Fondos" },
-    { id: "power", label: "Energía" },
     { id: "appearance", label: "Personalización" },
     { id: "settings", label: "Ajustes" },
     { id: "modules", label: "Módulos" },
@@ -299,8 +294,6 @@
               <WallpaperSection list={wallpapers} onSet={onWallpaper} />
             {/if}
           </div>
-        {:else}
-          <div class="cols"><PowerSection {allowChanges} onRun={onPower} /></div>
         {/if}
        </div>
       </div>

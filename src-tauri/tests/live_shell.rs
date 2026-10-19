@@ -87,3 +87,16 @@ fn tocar_windows_dos_veces_nunca_abre_inicio() {
     winkey::set_enabled(false, None);
     assert_eq!(taps.load(Ordering::SeqCst), 4);
 }
+
+#[test]
+#[ignore = "lee la bandeja y los procesos reales"]
+fn las_apps_en_segundo_plano_salen_de_la_bandeja_y_estan_en_marcha() {
+    use tesela_lib::infrastructure::windows::system::background::background_apps;
+    let _ = background_apps(); // primera muestra de CPU
+    std::thread::sleep(Duration::from_millis(1200));
+    let apps = background_apps();
+    for a in &apps {
+        println!("{:<28} {:<22} {:>5.1}% {:>7} MB  x{}  {}", a.name, a.exe, a.cpu_percent, a.ram_bytes / 1_000_000, a.processes, a.path);
+    }
+    assert!(!apps.is_empty(), "en este equipo hay apps con icono de bandeja en marcha");
+}

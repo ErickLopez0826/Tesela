@@ -171,6 +171,10 @@ fn toggle_panel_inner(app: &AppHandle, monitor: u32, focus: bool) {
                             eprintln!("[wm] el panel perdió el foco: se oculta");
                             begin_hide(&app2);
                             *PANEL_HID_AT.lock().unwrap() = Some(Instant::now());
+                            // La barra de tareas que se abrió junto al panel se cierra con él.
+                            if let Some(id) = crate::interface::shell::cursor_monitor() {
+                                crate::interface::taskbar::hide_unless_hovered(&app2, id);
+                            }
                         }
                     });
                     w

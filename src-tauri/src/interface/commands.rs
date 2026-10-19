@@ -230,7 +230,15 @@ pub async fn glass_image(
         "bar" => {
             let pos = window.outer_position().map_err(|e| e.to_string())?;
             let size = window.outer_size().map_err(|e| e.to_string())?;
-            let rect = Rect::new(pos.x, pos.y, size.width as i32, size.height as i32);
+            let own = Rect::new(pos.x, pos.y, size.width as i32, size.height as i32);
+            // Las barras de tareas copian siempre la misma zona (el centro de abajo del monitor, del tamaño máximo que puede
+            // tener la isla), no la de su ventana: así crecer o encogerse no obliga a copiar de nuevo y el desenfoque no
+            // desaparece mientras tanto. La vista coloca la imagen según el tamaño que tenga la isla en cada momento.
+            let rect = if window.label().starts_with("taskbar-") {
+                crate::interface::taskbar::glass_area(own)
+            } else {
+                own
+            };
             let label = window.label().to_string();
             blocking(move || Ok(backdrop::bar_image(&label, rect, blur, scale, refresh))).await
         }
@@ -257,9 +265,9 @@ pub fn shell_set(app: tauri::AppHandle, settings: crate::domain::shell::ShellSet
 /// La vista de la barra de tareas avisa del ancho (lógico) que necesita su contenido.
 #[cfg(windows)]
 #[tauri::command]
-pub fn taskbar_resize(app: tauri::AppHandle, window: tauri::WebviewWindow, width: f64) {
+pub fn taskbar_resize(app: tauri::AppHandle, window: tauri::WebviewWindow, width: f64, height: f64) {
     if let Some(monitor) = crate::interface::taskbar::monitor_of_label(window.label()) {
-        crate::interface::taskbar::resize(&app, monitor, width);
+        crate::interface::taskbar::resize(&app, monitor, width, height);
     }
 }
 
@@ -270,6 +278,183 @@ pub fn taskbar_hide(app: tauri::AppHandle, window: tauri::WebviewWindow) {
     if let Some(monitor) = crate::interface::taskbar::monitor_of_label(window.label()) {
         crate::interface::taskbar::hide(&app, monitor);
     }
+}
+
+/// Aplicaciones en segundo plano (con icono en la bandeja y en marcha) con lo que consumen.
+#[cfg(windows)]
+#[tauri::command]
+pub async fn background_apps() -> Result<Vec<crate::infrastructure::windows::system::background::BackgroundApp>, String> {
+    blocking(|| Ok(crate::infrastructure::windows::system::background::background_apps())).await
+}
+
+/// Icono de un ejecutable en marcha (para la sección de segundo plano).
+#[cfg(windows)]
+#[tauri::command]
+pub async fn exe_icon(path: String) -> Result<Option<String>, String> {
+    use crate::infrastructure::windows::system::background::{background_apps, known_path};
+    // Solo se da el icono de aplicaciones que el propio núcleo listó como en segundo plano.
+    blocking(move || Ok(known_path(&background_apps(), &path).and_then(|p| crate::infrastructure::windows::icons::exe_icon_url(&p)))).await
+}
+
+/// La aplicación en segundo plano con ese ejecutable. La interfaz nunca manda rutas: se busca aquí entre las que el núcleo
+/// listó, así ningún comando lanza un programa que no esté en esa lista.
+#[cfg(windows)]
+fn background_app(exe: &str) -> Result<crate::infrastructure::windows::system::background::BackgroundApp, String> {
+    use crate::infrastructure::windows::system::background::{background_apps, find_by_exe};
+    find_by_exe(&background_apps(), exe).ok_or_else(|| format!("«{exe}» no es una aplicación en segundo plano"))
+}
+
+/// Muestra y enfoca la ventana de la aplicación (aunque esté oculta); si no tiene, vuelve a lanzar su ejecutable (las apps de
+/// instancia única se limitan a mostrar la suya).
+#[cfg(windows)]
+fn open_app(app: &crate::infrastructure::windows::system::background::BackgroundApp) -> Result<(), String> {
+    use crate::infrastructure::windows::facts::{facts_of, hwnd_from, top_level_windows};
+    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_RESTORE, SW_SHOW};
+    let stem = app.exe.to_lowercase();
+    let stem = stem.trim_end_matches(".exe");
+    let window = top_level_windows()
+        .into_iter()
+        .filter_map(facts_of)
+        .find(|f| f.exe.to_lowercase().trim_end_matches(".exe") == stem && !f.title.trim().is_empty() && !f.tool_window);
+    if let Some(f) = window {
+        unsafe {
+            let _ = ShowWindow(hwnd_from(f.handle), if f.visible { SW_RESTORE } else { SW_SHOW });
+        }
+        crate::infrastructure::windows::platform::focus_window(f.handle);
+        return Ok(());
+    }
+    std::process::Command::new(&app.path).spawn().map(|_| ()).map_err(|e| format!("no se pudo abrir {}: {e}", app.exe))
+}
+
+/// Abre una aplicación en segundo plano.
+#[cfg(windows)]
+#[tauri::command]
+pub async fn background_open(exe: String) -> Result<(), String> {
+    blocking(move || open_app(&background_app(&exe)?)).await
+}
+
+/// Una acción que se puede hacer con una aplicación en segundo plano.
+#[cfg(windows)]
+#[derive(Serialize)]
+pub struct AppActionInfo {
+    pub id: String,
+    pub label: String,
+    /// Pide confirmación y se pinta como peligrosa (cerrar la aplicación).
+    pub danger: bool,
+    /// Si es un interruptor, su estado actual (silenciada o no).
+    pub on: Option<bool>,
+}
+
+#[cfg(windows)]
+fn user_actions_path() -> std::path::PathBuf {
+    crate::infrastructure::config_file::config_dir().join("app-actions.json")
+}
+
+/// Lo que se puede hacer con esa aplicación, según lo que sea: abrir y cerrar, silenciar su sonido si tiene, y las acciones
+/// propias de su perfil (Discord, Wallpaper Engine, Spotify, Steam o las del usuario en `app-actions.json`).
+#[cfg(windows)]
+#[tauri::command]
+pub async fn app_actions(exe: String) -> Result<Vec<AppActionInfo>, String> {
+    blocking(move || {
+        use crate::infrastructure::windows::system::{app_actions as actions, app_audio, background};
+        let app = background_app(&exe)?;
+        let mut list = vec![AppActionInfo { id: "open".into(), label: "Abrir".into(), danger: false, on: None }];
+        for d in actions::profile(&app.exe, &actions::load_user(&user_actions_path())) {
+            list.push(AppActionInfo { id: d.id, label: d.label, danger: false, on: None });
+        }
+        if let Some(muted) = app_audio::is_muted(&background::pids_for(&app.path)) {
+            list.push(AppActionInfo { id: "mute".into(), label: if muted { "Activar sonido".into() } else { "Silenciar app".into() }, danger: false, on: Some(muted) });
+        }
+        list.push(AppActionInfo { id: "quit".into(), label: "Cerrar".into(), danger: true, on: None });
+        Ok(list)
+    })
+    .await
+}
+
+/// Hace una de esas acciones. Todo se resuelve aquí: la interfaz solo dice qué aplicación y qué acción.
+#[cfg(windows)]
+#[tauri::command]
+pub async fn app_action_run(exe: String, id: String) -> Result<(), String> {
+    blocking(move || {
+        use crate::infrastructure::windows::system::{app_actions as actions, app_audio, background};
+        let app = background_app(&exe)?;
+        match id.as_str() {
+            "open" => open_app(&app),
+            "quit" => {
+                background::kill_all(&app.path);
+                Ok(())
+            }
+            "mute" => {
+                let pids = background::pids_for(&app.path);
+                let muted = app_audio::is_muted(&pids).ok_or("la aplicación no tiene sonido")?;
+                app_audio::set_muted(&pids, !muted);
+                Ok(())
+            }
+            other => {
+                let def = actions::profile(&app.exe, &actions::load_user(&user_actions_path()))
+                    .into_iter()
+                    .find(|d| d.id == other)
+                    .ok_or_else(|| format!("acción desconocida: {other}"))?;
+                match def.effect {
+                    actions::Effect::Keys(k) => {
+                        let keys = actions::parse_keys(&k).ok_or_else(|| format!("atajo no válido: {k}"))?;
+                        actions::send_chord(&keys);
+                        Ok(())
+                    }
+                    // Solo con el propio ejecutable de la aplicación (su ruta sale de la lista, no de la interfaz).
+                    actions::Effect::Exec(args) => std::process::Command::new(&app.path).args(args).spawn().map(|_| ()).map_err(|e| e.to_string()),
+                    actions::Effect::Uri(u) => {
+                        if !actions::uri_allowed(&u) {
+                            return Err(format!("enlace no permitido: {u}"));
+                        }
+                        actions::open_uri(&u)
+                    }
+                }
+            }
+        }
+    })
+    .await
+}
+
+/// Abre la ventana emergente de una aplicación en segundo plano junto a su botón «⋯». La barra manda el rectángulo del botón
+/// (px lógicos de cliente de su ventana); el núcleo lo pasa a pantalla.
+#[cfg(windows)]
+#[tauri::command]
+pub fn popup_open(app: tauri::AppHandle, window: tauri::WebviewWindow, exe: String, name: String, path: String, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
+    use crate::domain::geometry::Rect;
+    let pos = window.outer_position().map_err(|e| e.to_string())?;
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let anchor = Rect::new(pos.x + (x * scale).round() as i32, pos.y + (y * scale).round() as i32, (w * scale).round() as i32, (h * scale).round() as i32);
+    crate::interface::popup::open(&app, anchor, &exe, &name, &path);
+    Ok(())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub fn popup_close(app: tauri::AppHandle) {
+    crate::interface::popup::close(&app);
+}
+
+/// La ventana emergente pide el tamaño (lógico) que necesita su contenido.
+#[cfg(windows)]
+#[tauri::command]
+pub fn popup_resize(app: tauri::AppHandle, width: f64, height: f64) {
+    crate::interface::popup::resize(&app, width, height);
+}
+
+/// Respaldo de la tecla Windows desde el panel (ver `winkey::page_key`).
+#[cfg(windows)]
+#[tauri::command]
+pub fn winkey_page_key(kind: String) {
+    crate::infrastructure::windows::winkey::page_key(&kind);
+}
+
+/// El panel avisa de que recibió un clic o el foco: se refresca el gancho de la tecla Windows (ver `keep_hook_fresh`).
+#[cfg(windows)]
+#[tauri::command]
+pub fn winkey_refresh() {
+    crate::interface::shell::keep_hook_fresh();
+    crate::infrastructure::windows::winkey::reinstall();
 }
 
 /// Enfoca una ventana desde la barra de tareas (cambia de workspace y la restaura si hace falta).

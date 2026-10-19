@@ -5,6 +5,7 @@ pub mod bar;
 pub mod commands;
 pub mod focus_border;
 pub mod modules_protocol;
+pub mod popup;
 #[cfg(windows)]
 pub mod shell;
 #[cfg(windows)]

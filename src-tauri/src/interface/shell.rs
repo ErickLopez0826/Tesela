@@ -1,6 +1,7 @@
 //! Lo que Tesela reemplaza de la interfaz de Windows: su barra de tareas y el toque de la tecla Windows. Se guarda en
 //! `shell.json` y se aplica al arrancar y al cambiarlo desde Ajustes.
 
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use tauri::AppHandle;
@@ -14,6 +15,8 @@ static HOVER: std::sync::Once = std::sync::Once::new();
 /// La ventana que tenía el foco justo antes de abrir el panel: al cerrarlo se le devuelve, para que Windows no tenga que
 /// elegir una por su cuenta (con su barra oculta, esa elección acababa en el menú Inicio).
 static PREVIOUS: Mutex<isize> = Mutex::new(0);
+static APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
+static REFRESH_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static GUARD: std::sync::Once = std::sync::Once::new();
 
 pub fn get() -> ShellSettings {
@@ -21,7 +24,7 @@ pub fn get() -> ShellSettings {
 }
 
 /// Monitor donde está el cursor (o el principal).
-fn cursor_monitor() -> Option<u32> {
+pub fn cursor_monitor() -> Option<u32> {
     use windows::Win32::Foundation::POINT;
     use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
     let monitors = list_monitors();
@@ -79,14 +82,30 @@ unsafe extern "system" fn foreground_changed(
         dismiss_start(hwnd);
     }
     if what.starts_with("tesela.exe") {
-        // Con el panel al frente el gancho de teclado dejaba de recibir teclas: se vuelve a poner, ya con el panel activo.
-        let _ = std::thread::Builder::new().name("wm-winkey-reinstall".into()).spawn(|| {
-            for ms in [150u64, 500] {
-                std::thread::sleep(std::time::Duration::from_millis(ms));
-                winkey::reinstall();
-            }
-        });
+        keep_hook_fresh();
     }
+}
+
+/// Con una ventana de Tesela (un WebView) en uso, el gancho de teclado ya puesto deja de recibir teclas: se vuelve a poner
+/// cada poco mientras el panel esté a la vista (el nuevo se instala antes de retirar el viejo, sin huecos). También se
+/// llama al hacer clic dentro del panel, que es cuando el WebView toma el foco de teclado.
+pub fn keep_hook_fresh() {
+    if REFRESH_RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let _ = std::thread::Builder::new().name("wm-winkey-refresh".into()).spawn(|| {
+        let started = std::time::Instant::now();
+        // Dura mientras el panel esté a la vista (con un tope por si algo falla).
+        while started.elapsed() < std::time::Duration::from_secs(600) {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            winkey::reinstall();
+            let open = APP.get().is_some_and(crate::interface::bar::panel_open);
+            if !open && started.elapsed() > std::time::Duration::from_millis(1500) {
+                break;
+            }
+        }
+        REFRESH_RUNNING.store(false, Ordering::SeqCst);
+    });
 }
 
 /// Red de seguridad: avisa en cuanto cambia la ventana al frente (sin sondear) y, si es Inicio o la búsqueda de Windows
@@ -150,6 +169,7 @@ fn apply(app: &AppHandle, s: ShellSettings) {
     winshell::hide_taskbar(s.replace_taskbar);
     crate::interface::taskbar::set_enabled(s.replace_taskbar);
     // Red de seguridad: si por lo que sea Inicio llega a abrirse mientras la tecla Windows es de Tesela, se cierra al instante.
+    let _ = APP.set(app.clone());
     GUARD.call_once(start_guard);
     HOVER.call_once(|| crate::interface::taskbar::start_hover_trigger(app));
     // Crear o quitar ventanas desde un hilo aparte: en el principal bloquearía el bucle de eventos.

@@ -1,6 +1,6 @@
 # Instalación, arranque con Windows y actualizaciones (Fase 10)
 
-Todo lo de aquí está **preparado**; no se ha publicado, firmado ni instalado nada.
+Todo lo de aquí está **preparado**; no se ha publicado, firmado ni instalado nada. (Para entender cómo funciona la app por dentro, ver [`como-funciona.md`](como-funciona.md).)
 
 ## 1. Generar el instalador (un solo archivo)
 
@@ -9,7 +9,7 @@ npm install
 npm run tauri build          # genera el instalador NSIS (usa la configuración de src-tauri/tauri.conf.json)
 ```
 
-Resultado: `src-tauri\target\release\bundle\nsis\Tesela_1.3.0_x64-setup.exe`.
+Resultado: `src-tauri\target\release\bundle\nsis\Tesela_1.7.0_x64-setup.exe`.
 
 - Instala **por usuario**, sin permisos de administrador (`installMode: currentUser`) y en español.
 - Incluye la carpeta `modules\` (notas, apps, portapapeles, velocidad, pareja y el ejemplo) en los recursos de la app; la

@@ -47,14 +47,14 @@ describe("GeneralPanel", () => {
 
   it("las casillas de la interfaz de Windows guardan el cambio y muestran lo que devuelve el guardado", async () => {
     const onShell = vi.fn().mockImplementation(async (v) => v);
-    render(GeneralPanel, props(base, { shell: { replace_taskbar: true, win_key_panel: true }, onShell }));
+    render(GeneralPanel, props(base, { shell: { replace_taskbar: true, win_key_panel: true, show_background: true }, onShell }));
     const taskbar = screen.getByLabelText(/Reemplazar la barra de tareas de Windows/) as HTMLInputElement;
     const winKey = screen.getByLabelText(/La tecla Windows abre el panel/) as HTMLInputElement;
     expect([taskbar.checked, winKey.checked]).toEqual([true, true]);
     await fireEvent.click(taskbar);
-    expect(onShell).toHaveBeenLastCalledWith({ replace_taskbar: false, win_key_panel: true });
+    expect(onShell).toHaveBeenLastCalledWith({ replace_taskbar: false, win_key_panel: true, show_background: true });
     await fireEvent.click(winKey);
-    expect(onShell).toHaveBeenLastCalledWith({ replace_taskbar: false, win_key_panel: false });
+    expect(onShell).toHaveBeenLastCalledWith({ replace_taskbar: false, win_key_panel: false, show_background: true });
     await waitFor(() => expect(taskbar.checked).toBe(false));
   });
 

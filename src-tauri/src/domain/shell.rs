@@ -9,11 +9,13 @@ pub struct ShellSettings {
     pub replace_taskbar: bool,
     /// Tocar la tecla Windows abre el panel de Tesela en vez del menú Inicio (los atajos con Windows siguen funcionando).
     pub win_key_panel: bool,
+    /// La barra de tareas de Tesela muestra las aplicaciones en segundo plano (las de la bandeja de Windows).
+    pub show_background: bool,
 }
 
 impl Default for ShellSettings {
     fn default() -> Self {
-        ShellSettings { replace_taskbar: true, win_key_panel: true }
+        ShellSettings { replace_taskbar: true, win_key_panel: true, show_background: true }
     }
 }
 
@@ -24,13 +26,13 @@ mod tests {
     #[test]
     fn por_defecto_todo_esta_activado() {
         let s = ShellSettings::default();
-        assert!(s.replace_taskbar && s.win_key_panel);
+        assert!(s.replace_taskbar && s.win_key_panel && s.show_background);
     }
 
     #[test]
     fn faltan_campos_se_completan_con_los_de_siempre() {
         let s: ShellSettings = serde_json::from_str(r#"{"replace_taskbar": false}"#).unwrap();
-        assert_eq!(s, ShellSettings { replace_taskbar: false, win_key_panel: true });
+        assert_eq!(s, ShellSettings { replace_taskbar: false, win_key_panel: true, show_background: true });
         let s: ShellSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(s, ShellSettings::default());
     }

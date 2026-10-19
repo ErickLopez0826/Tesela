@@ -1,6 +1,6 @@
 # Window Manager App: Documento de planificación
 
-Versión: 0.1 (borrador de planificación, sin código)
+Versión: 0.2 (planificación; el código avanza por fases, ver PROGRESS.md; la sección 18 añade el buscador, pendiente de implementar)
 Autor: Erick
 Estado: Pendiente de cerrar tres decisiones marcadas en la sección 11
 
@@ -45,6 +45,7 @@ GlazeWM se mantiene instalado como respaldo durante todo el desarrollo.
 | Apps en el panel | Dos listas: **abiertas** y **fijadas**, intercambiables. |
 | Módulo de pareja | Instalable por separado. Mensajes en tiempo real con delay razonable. Avatar animado. Último en desarrollarse. |
 | ai-bridge.py | Fuera de alcance por ahora. Muestra tokens de Claude y Gemini. Se retoma después. |
+| Buscador de aplicaciones | Tesela tendrá su **propio buscador** para poder eliminar Flow Launcher. Se abre con **ctrl+shift+espacio**. Detalle en la sección 18. **Pendiente de implementar** (decidido por Erick: se deja para después). |
 
 ---
 
@@ -414,6 +415,13 @@ Cada fase tiene un criterio de terminado. No se pasa a la siguiente sin cumplirl
 - Arranque con Windows, instalador, actualizaciones.
 - **Terminado cuando**: la app arranca sola, se instala con un solo archivo y se actualiza.
 
+### Fase 11: Buscador de aplicaciones (pendiente)
+- Atajo global, ventana de búsqueda junto a la barra, resultados con cristal y animaciones del panel.
+- Aplicaciones instaladas y abiertas, redirecciones y búsquedas web configurables desde el panel.
+- Orden por coincidencia y uso reciente; Enter abre y ctrl+Enter abre como administrador.
+- **Terminado cuando**: Erick puede desinstalar Flow Launcher y hacer con Tesela todo lo que hacía con él (sección 18.12).
+- El detalle completo está en la sección 18. No se implementa hasta que Erick lo pida.
+
 ---
 
 ## 13. Pruebas por caso límite
@@ -481,6 +489,8 @@ Estas pruebas se escriben desde la fase 2, sobre el dominio, sin abrir ventanas 
 - **Bluetooth** es lo más complejo de los módulos, por la API WinRT. Mitigación: dejarlo para una fase tardía.
 - **Permisos de administrador** dan acceso amplio. Mitigación: los módulos solo reciben los permisos declarados en su manifiesto.
 - **Módulo de pareja** depende de un backend. Mitigación: se desarrolla al final, cuando el resto esté estable.
+- **Buscador**: el atajo ctrl+shift+espacio lo usan otras aplicaciones (por ejemplo, el editor VS Code lo usa para mostrar la ayuda de parámetros); al registrarse como atajo global, Tesela se lo quitará a todas. Mitigación: el atajo es configurable en el archivo de configuración y se avisa si no se puede registrar (ver 18.4).
+- **Buscador**: la ventana de búsqueda necesita foco de teclado y, con un WebView de Tesela enfocado, Windows deja de llamar a los ganchos de teclado. Mitigación ya conocida: ver 18.4.
 
 ---
 
@@ -513,3 +523,179 @@ Los conceptos que cambian:
 - **AppBar**: franja de Windows que reserva espacio en el borde de la pantalla.
 - **Módulo**: funcionalidad instalable que usa la API del núcleo.
 - **Manifiesto**: archivo que describe un módulo y sus permisos.
+- **Redirección**: palabra que, escrita en el buscador, abre una dirección web fija (por ejemplo, «claude» abre claude.com).
+- **Búsqueda web**: palabra clave seguida de un texto que se envía a una página de búsqueda (por ejemplo, «g gatos»).
+
+---
+
+## 18. Buscador de aplicaciones propio (pendiente de implementar)
+
+> **Estado: planificado, no implementado.** Erick decidió dejarlo para después. Esta sección fija lo acordado para que
+> se pueda construir sin volver a preguntar. Las decisiones marcadas «a confirmar» son suposiciones razonables que Erick
+> puede cambiar al empezar.
+
+### 18.1 Objetivo
+
+Tener dentro de Tesela un buscador rápido de aplicaciones, al estilo de **Flow Launcher**, para poder **desinstalar Flow
+Launcher** y dejar una sola herramienta. Se abre con un atajo global, se escribe, se elige con el teclado y se abre.
+
+### 18.2 Decisiones de Erick
+
+| Tema | Decisión |
+|---|---|
+| Atajo | **ctrl+shift+espacio** (abre y también cierra el buscador). |
+| Qué busca | **Aplicaciones** (instaladas y abiertas) y **redirecciones / búsquedas web** configurables. Sin archivos, sin calculadora, sin comandos del sistema en la primera versión. |
+| Redirecciones | Se configuran desde el **panel informativo de Tesela** (Ajustes). Ejemplo pedido: escribir un nombre y abrir `claude.com`. |
+| Aspecto | **Ventana pequeña junto a la barra**, con los **resultados debajo**, con el **mismo estilo de cristal y animaciones del panel**. Similar a Flow Launcher. |
+| Enter | Abre el resultado normalmente. |
+| ctrl+Enter | Abre el resultado **como administrador**. |
+| Orden | **Por coincidencia y por uso reciente**: lo que más se abre, sale primero. |
+
+### 18.3 Comportamiento
+
+- **Abrir**: ctrl+shift+espacio muestra la ventana en el **monitor donde está el cursor**, con el cuadro de texto enfocado
+  y vacío. Si ya está abierta, el mismo atajo la cierra.
+- **Cerrar**: Escape, ctrl+shift+espacio otra vez, o perder el foco (hacer clic fuera). Al cerrarse con una animación
+  igual que la del panel (0,38 s; la de apertura, 0,5 s).
+- **Resultados en vivo** debajo del cuadro, mientras se escribe. Máximo de resultados visibles: unos 8; si hay más, se
+  puede desplazar (con la barra de desplazamiento oculta pero funcional, como en la lista de segundo plano).
+- **Teclado**: flechas arriba/abajo para moverse, Enter para abrir, ctrl+Enter para abrir como administrador, Escape para
+  cerrar. El primer resultado queda seleccionado de forma automática.
+- **Ratón**: clic en un resultado lo abre; pasar el cursor lo resalta.
+- Cada resultado muestra **icono**, **nombre** y una línea secundaria (por ejemplo «Aplicación», «En ejecución», o la
+  dirección de una redirección).
+- Abrir una aplicación **que ya está abierta** la enfoca (cambiando de workspace si hace falta) en lugar de lanzar otra
+  copia; si no está abierta, la lanza.
+- Tras abrir algo, la ventana se cierra.
+
+### 18.4 Atajo, foco y la tecla Windows
+
+Puntos técnicos que condicionan el diseño y ya se conocen por el trabajo hecho con la barra y el panel:
+
+- **Registro del atajo**: como atajo global del sistema (el mismo mecanismo de los atajos de la sección 8, que acepta
+  `ctrl` y `shift`), **no** con el gancho de teclado: así no depende de que el gancho reciba teclas. Se declara en
+  `config.toml` como un atajo más (`buscador` → `ctrl+shift+space`), por lo que es configurable. Si otra aplicación ya lo
+  tiene registrado, se avisa y se explica cómo cambiarlo.
+- **Aviso sobre el atajo**: ctrl+shift+espacio se usa en otras aplicaciones; al ser global, Tesela se lo quita (ver riesgos,
+  sección 15).
+- **Foco de teclado**: a diferencia de la barra de tareas, **esta ventana necesita foco** (hay que escribir). Se sabe que,
+  con un WebView de Tesela con foco de teclado, Windows deja de llamar a los ganchos de teclado y la tecla Windows podría
+  abrir la búsqueda de Windows. Por eso la ventana de búsqueda debe llevar **el mismo respaldo que el panel**: avisar al
+  núcleo de las teclas que le llegan para que la tecla Windows siga siendo de Tesela, y reinstalar el gancho mientras esté
+  abierta.
+- **Cierre al perder el foco**, como el panel; el clic que la cierra no debe reabrirla.
+- Se reutiliza la ventana (se oculta, no se destruye) y su WebView se duerme mientras está oculta.
+
+### 18.5 Fuentes de resultados
+
+1. **Aplicaciones instaladas**: las del menú Inicio (accesos directos y aplicaciones de la tienda). Ya existe un escáner de
+   aplicaciones instaladas en el núcleo, que se reutiliza y se amplía (nombre visible, ruta o identificador, icono).
+   Se indexa al arrancar y se actualiza cada cierto tiempo y cada vez que se abre el buscador si pasó un rato.
+2. **Aplicaciones abiertas**: las ventanas actuales (las mismas que ve la barra de tareas). Aparecen marcadas «En
+   ejecución» y, al elegirlas, se enfocan.
+3. **Redirecciones**: una palabra que abre una dirección fija (18.6).
+4. **Búsquedas web**: una palabra clave más un texto, que se envía a un buscador (18.6).
+
+Las fuentes se consultan en el núcleo (Rust), no en la interfaz; la interfaz solo recibe la lista ya ordenada.
+
+### 18.6 Redirecciones y búsquedas web (configurables)
+
+Se administran desde el **panel informativo → Ajustes → Buscador** (sección nueva). Cada entrada tiene:
+
+| Campo | Ejemplo | Para qué |
+|---|---|---|
+| Palabra | `claude` | Lo que se escribe para activarla. |
+| Dirección | `https://claude.com` | A dónde lleva. |
+| Tipo | Redirección / Búsqueda | Una redirección abre la dirección tal cual; una búsqueda sustituye el texto escrito. |
+
+- **Redirección**: al escribir `claude`, aparece el resultado «Abrir claude.com»; Enter abre la dirección en el navegador
+  predeterminado.
+- **Búsqueda web** (suposición, a confirmar): la dirección lleva el marcador `{q}`, por ejemplo
+  `https://www.google.com/search?q={q}`; al escribir `g gatos` se abre la búsqueda de «gatos». El texto se codifica para
+  direcciones web antes de insertarlo.
+- Se pueden **añadir, editar, borrar y reordenar** desde el panel; se guardan en un archivo de la carpeta de configuración
+  (por ejemplo `search.json`), igual que las exclusiones.
+- **Entradas de fábrica (a confirmar)**: ninguna redirección; una búsqueda de ejemplo con `g` (Google) que Erick puede
+  borrar.
+- **Reglas de validación**: solo direcciones `http://` y `https://`; la palabra no puede estar vacía ni repetirse; un
+  texto con `{q}` solo en las de tipo búsqueda.
+- Coincidencia: se compara la palabra al **principio** de lo escrito; si coincide exactamente con una redirección, esta
+  sube a primer lugar.
+
+### 18.7 Orden de los resultados
+
+Puntuación combinada, calculada en el núcleo:
+
+1. **Coincidencia** con lo escrito: empieza por el texto > palabras que empiezan por él > letras en orden (búsqueda
+   «difusa»). Sin coincidencia no aparece.
+2. **Uso reciente**: cada vez que se abre un resultado desde el buscador se anota; los más abiertos y los abiertos hace
+   poco suben. El peso del uso envejece con el tiempo para que lo antiguo no domine.
+3. **Desempate**: las aplicaciones en ejecución primero, después por orden alfabético.
+4. Con el cuadro vacío se muestran las **más usadas** (hasta unas 8).
+
+El historial de uso se guarda **localmente** en un archivo de la carpeta de estado y se puede **borrar** desde
+Ajustes → Buscador. No se envía a ningún sitio.
+
+### 18.8 Abrir como administrador (ctrl+Enter)
+
+- Se lanza el programa pidiendo elevación a Windows; Windows muestra su aviso de control de cuentas (UAC) y el usuario lo
+  acepta o no. Tesela **no** guarda ni salta ese aviso.
+- Solo tiene sentido para aplicaciones; en una redirección o una búsqueda web, ctrl+Enter hace lo mismo que Enter.
+- Si el usuario cancela el aviso, no pasa nada (no se muestra error).
+
+### 18.9 Arquitectura (por capas)
+
+- **Dominio** (puro, con pruebas): modelo de resultado (`SearchItem`: tipo, título, subtítulo, destino, puntuación),
+  puntuación y orden (`score`, `rank`), análisis de lo escrito (¿redirección?, ¿búsqueda con palabra clave?), validación
+  de redirecciones, normalización del uso.
+- **Aplicación**: caso de uso «buscar» (une las fuentes y ordena) y «abrir» (enfocar si está abierta, lanzar si no,
+  elevar si se pide, anotar el uso).
+- **Infraestructura**: índice de aplicaciones instaladas (ampliando el escáner existente), lectura de ventanas abiertas,
+  almacén de redirecciones y almacén de uso (JSON en disco), lanzamiento (con y sin elevación) y apertura de direcciones
+  web con el navegador predeterminado, extracción de iconos por ejecutable (ya existe).
+- **Interfaz**: ventana propia sin decoración y transparente (`search`), comandos `search_query(texto)`,
+  `search_open(id, como_admin)`, `search_close`, `search_redirects_get/set`, `search_history_clear`; vista Svelte con
+  cuadro de texto y lista de resultados; sección nueva en Ajustes. Los comandos reciben **identificadores de resultado**,
+  nunca rutas ni direcciones: el núcleo las resuelve (misma regla de seguridad que las acciones de segundo plano).
+
+### 18.10 Seguridad
+
+- La interfaz **nunca manda rutas ni comandos**: manda el identificador de un resultado que el propio núcleo acaba de
+  ofrecer. Si el identificador no existe o ya no es válido, no se hace nada.
+- Las direcciones de las redirecciones solo pueden ser `http://` o `https://`; se rechazan `file:`, `javascript:` y
+  esquemas desconocidos.
+- Lo escrito en una búsqueda web se **codifica** antes de insertarse en la dirección; nunca se pasa por una consola.
+- Abrir como administrador siempre pasa por el aviso de Windows.
+
+### 18.11 Pruebas previstas
+
+- **Dominio**: la puntuación ordena bien (empieza por, palabras, difusa); el uso reciente sube un resultado pero no uno
+  que no coincide; el envejecimiento funciona; el análisis de «palabra + texto»; la validación de redirecciones (esquemas
+  y duplicados); la codificación de `{q}` con tildes, espacios y símbolos.
+- **Infraestructura**: el almacén de redirecciones y el de uso leen y guardan; un archivo dañado no rompe nada; el índice
+  de aplicaciones encuentra al menos una aplicación real (prueba en vivo `#[ignore]`).
+- **Interfaz**: la lista se mueve con las flechas; Enter y ctrl+Enter llaman a la acción correcta; Escape cierra; el primer
+  resultado se selecciona solo; la sección de Ajustes añade, edita y borra redirecciones.
+- **En vivo** (con teclas simuladas, como las demás): el atajo abre y cierra la ventana en el monitor del cursor; abrir una
+  aplicación ya abierta la enfoca; la tecla Windows sigue siendo de Tesela con el buscador abierto.
+
+### 18.12 Terminado cuando
+
+Erick puede desinstalar Flow Launcher y: abrir cualquier aplicación escribiendo unas letras, enfocar las que ya están
+abiertas, abrir una como administrador, usar sus redirecciones (como la de `claude.com`), y todo ello con el atajo
+ctrl+shift+espacio, sin que la tecla Windows ni el resto de Tesela se vean afectados.
+
+### 18.13 Fuera de alcance (por ahora)
+
+Búsqueda de archivos y carpetas, calculadora y conversiones, comandos del sistema (apagar, bloquear…), portapapeles,
+complementos de terceros y sincronización de las redirecciones entre equipos. Todo eso puede añadirse después como
+fuentes nuevas sin cambiar la arquitectura de 18.9.
+
+### 18.14 Detalles a confirmar al empezar
+
+1. **Búsquedas web**: formato con `{q}` y la palabra clave seguida de un espacio (suposición de 18.6). ¿Se quiere alguna
+   de fábrica además de Google?
+2. **Posición exacta**: centrada bajo la barra superior del monitor del cursor, como el panel, o alineada a otro punto.
+3. **Qué hacer con Flow Launcher** mientras tanto: puede convivir (no usan el mismo atajo si el de Flow sigue siendo
+   alt+espacio). Erick lo desinstalará cuando el buscador cumpla 18.12.
+4. **Atajo**: si ctrl+shift+espacio choca con otra aplicación que Erick use, ¿se prefiere otro?

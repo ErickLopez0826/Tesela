@@ -38,6 +38,9 @@ function api(): TaskbarApi {
     icon: vi.fn().mockResolvedValue("data:image/png;base64,AAA"),
     resize: vi.fn().mockResolvedValue(undefined),
     hide: vi.fn().mockResolvedValue(undefined),
+    exeIcon: vi.fn().mockResolvedValue("data:image/png;base64,BBB"),
+    openBackground: vi.fn().mockResolvedValue(undefined),
+    openPopup: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -108,5 +111,100 @@ describe("TaskbarView", () => {
     cleanup();
     render(TaskbarView, { state: null, monitorId: 0, api: api(), onWorkspace: () => {} });
     expect(document.querySelectorAll(".group").length).toBe(0);
+  });
+});
+
+describe("TaskbarView: segundo plano y energía", () => {
+  // jsdom no tiene `Element.animate`, que usan las transiciones de Svelte al aparecer iconos nuevos.
+  beforeEach(() => {
+    (Element.prototype as unknown as { animate: unknown }).animate ??= () => ({ finished: Promise.resolve(), cancel() {}, onfinish: null });
+  });
+  const bg = (n: number) => ({ name: `App ${n}`, exe: `app${n}.exe`, path: `C:/app${n}.exe`, cpu_percent: 1.5, ram_bytes: 100e6, processes: 1 });
+
+  it("las apps en segundo plano están ocultas y se despliegan hacia arriba al pulsar el botón", async () => {
+    const a = api();
+    render(TaskbarView, { state: snapshot([]), monitorId: 0, api: a, onWorkspace: () => {}, background: [bg(1), bg(2)] });
+    expect(document.querySelector(".bgpanel")).toBeNull();
+    const toggle = screen.getByRole("button", { name: "Aplicaciones en segundo plano (2)" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    await fireEvent.click(toggle);
+    expect(document.querySelectorAll(".bgpanel .card").length).toBe(2);
+    const card = screen.getByRole("button", { name: /App 1 · CPU 1.5%/ });
+    expect(card.textContent).toContain("App 1");
+    await waitFor(() => expect(card.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,BBB"));
+    await fireEvent.click(card);
+    expect(a.openBackground).toHaveBeenCalledWith("app1.exe");
+    expect(a.hide).toHaveBeenCalledTimes(1);
+    await fireEvent.click(toggle);
+    expect(document.querySelector(".bgpanel")).toBeNull();
+  });
+
+  it("«⋯» abre la ventana emergente de esa app junto al botón y no despliega nada dentro de la barra", async () => {
+    const a = api();
+    render(TaskbarView, { state: snapshot([]), monitorId: 0, api: a, onWorkspace: () => {}, background: [bg(1)] });
+    await fireEvent.click(screen.getByRole("button", { name: "Aplicaciones en segundo plano (1)" }));
+    const before = document.querySelector(".bgpanel")!.innerHTML.length;
+    await fireEvent.click(screen.getByRole("button", { name: "Acciones de App 1" }));
+    expect(a.openPopup).toHaveBeenCalledTimes(1);
+    expect((a.openPopup as ReturnType<typeof vi.fn>).mock.calls[0][0].exe).toBe("app1.exe");
+    expect(document.querySelector(".actions")).toBeNull();
+    expect(document.querySelector(".bgpanel")!.innerHTML.length).toBe(before);
+  });
+
+  it("mide el tamaño de diseño de la isla, no el escalado por la animación de aparición", async () => {
+    const a = api();
+    const w = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(300);
+    const h = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(46);
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ width: 282, height: 43, x: 0, y: 0, top: 0, left: 0, right: 282, bottom: 43, toJSON() {} });
+    try {
+      render(TaskbarView, { state: snapshot([]), monitorId: 0, api: a, onWorkspace: () => {} });
+      await waitFor(() => expect(a.resize).toHaveBeenCalled());
+      expect(a.resize).toHaveBeenCalledWith(302, 48);
+    } finally {
+      w.mockRestore();
+      h.mockRestore();
+      rect.mockRestore();
+    }
+  });
+
+  it("con muchas apps solo hay un botón en la fila (no se ensancha) y la lista vive en su propio panel", () => {
+    const many = Array.from({ length: 30 }, (_, i) => bg(i + 1));
+    render(TaskbarView, { state: snapshot([]), monitorId: 0, api: api(), onWorkspace: () => {}, background: many });
+    expect(document.querySelectorAll(".row .app, .row .card").length).toBe(0);
+    expect(screen.getByRole("button", { name: "Aplicaciones en segundo plano (30)" })).toBeTruthy();
+  });
+
+  it("sin apps en segundo plano no hay botón, y el de energía solo está si se pasa", () => {
+    render(TaskbarView, { state: snapshot([]), monitorId: 0, api: api(), onWorkspace: () => {} });
+    expect(screen.queryByRole("button", { name: /segundo plano/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Energía" })).toBeNull();
+    cleanup();
+    render(TaskbarView, { state: snapshot([]), monitorId: 0, api: api(), onWorkspace: () => {}, power: { allowChanges: false, run: vi.fn() } });
+    expect(screen.getByRole("button", { name: "Energía" })).toBeTruthy();
+  });
+
+  it("al abrir Energía se ocultan las apps y solo quedan sus botones y «Volver»; volver restaura la barra", async () => {
+    render(TaskbarView, {
+      state: snapshot([win(1, 1, "code")]),
+      monitorId: 0,
+      api: api(),
+      onWorkspace: () => {},
+      background: [bg(1)],
+      power: { allowChanges: true, run: vi.fn() },
+    });
+    expect(document.querySelectorAll(".group").length).toBe(1);
+    await fireEvent.click(screen.getByRole("button", { name: "Energía" }));
+    expect(document.querySelectorAll(".group").length).toBe(0);
+    expect(screen.queryByRole("button", { name: /segundo plano/ })).toBeNull();
+    for (const label of ["Suspender", "Reiniciar", "Hibernar", "Apagar"]) expect(screen.getByText(label)).toBeTruthy();
+    await fireEvent.click(screen.getByRole("button", { name: "Volver a la barra de tareas" }));
+    expect(document.querySelectorAll(".group").length).toBe(1);
+    expect(screen.getByRole("button", { name: "Energía" })).toBeTruthy();
+  });
+
+  it("al cerrarse usa su propia animación de salida", async () => {
+    const { rerender } = render(TaskbarView, { state: snapshot([]), monitorId: 0, api: api(), onWorkspace: () => {}, openTick: 0, closeTick: 0 });
+    await rerender({ closeTick: 1 });
+    expect(document.querySelector(".stage")?.classList.contains("closing")).toBe(true);
   });
 });

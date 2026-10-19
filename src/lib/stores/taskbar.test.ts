@@ -83,3 +83,13 @@ describe("barra de tareas: iconos", () => {
     expect(windowLabel(win(1, 1, "code", { title: " " }))).toBe("code");
   });
 });
+
+describe("backgroundLabel", () => {
+  it("resume nombre, CPU y memoria, y cuenta los procesos si hay varios", async () => {
+    const { backgroundLabel } = await import("./taskbar");
+    const bytes = (n: number) => `${n / 1e6} MB`;
+    expect(backgroundLabel({ name: "Discord", cpu_percent: 1.234, ram_bytes: 200e6, processes: 6 }, bytes)).toBe("Discord · CPU 1.2% · 200 MB · 6 procesos");
+    expect(backgroundLabel({ name: "Steam", cpu_percent: 0, ram_bytes: 100e6, processes: 1 }, bytes)).toBe("Steam · CPU 0% · 100 MB");
+    expect(backgroundLabel({ name: "X", cpu_percent: 12.6, ram_bytes: 1e6, processes: 1 }, bytes)).toContain("CPU 13%");
+  });
+});

@@ -257,3 +257,38 @@ Causa real de que la tecla Windows abriese la búsqueda: mientras el panel (un W
 ## D-100 · Misma duración en panel y barra, y confirmación al cerrar (1.3.0)
 
 Panel y barra de tareas se muestran en 0,5 s y se ocultan en 0,38 s (la ventana se oculta a los 460 ms en ambos). «Cerrar Tesela» pide confirmación («Sí, cerrar» / «Cancelar», se retira sola a los 5 s).
+
+## D-101 · Energía y segundo plano en la barra; gancho de teclado vivo con el panel en uso (1.4.0)
+
+- Energía sale del panel y pasa a la barra de tareas (`PowerMenu`): un botón que despliega las acciones con icono y texto y pide confirmación ahí mismo.
+- Aplicaciones en segundo plano: se leen de `HKCU\Control Panel\NotifyIconSettings` (Windows 11 guarda ahí cada app con icono de bandeja) y se cruzan con los procesos en marcha; la barra las muestra con su icono y, al pasar el cursor, CPU y memoria. Casilla en Ajustes para ocultarlas (`show_background`). Windows no permite leer la bandeja de otra forma.
+- La barra se cierra con su propia animación (`fall`): reutilizar el nombre de la de apertura con `reverse` no la reiniciaba.
+- Al perder el foco el panel, la barra abierta junto a él se cierra también (salvo que el cursor esté sobre ella).
+- El gancho de la tecla Windows se reinstala cada 400 ms mientras el panel está abierto y al hacer clic en él (el WebView con foco de teclado deja sordos a los ganchos anteriores).
+
+## D-102 · Segundo plano: la interfaz ya no manda rutas (1.4.1)
+
+Revisión de seguridad: `background_open` lanzaba la ruta que recibía del frontend. Ahora recibe solo el nombre del ejecutable y la ruta sale de la lista que arma el núcleo (`find_by_exe`); `exe_icon` solo atiende rutas de esa lista (`known_path`). Un contenido web comprometido ya no puede lanzar programas arbitrarios por esos comandos.
+
+## D-103 · Respaldo de la tecla Windows desde el panel, lista de segundo plano hacia arriba y Energía a pantalla propia (1.5.0)
+
+- Con un clic dentro del panel Windows deja de llamar a TODOS los ganchos de teclado (también a uno nuevo de otro proceso; Chrome no lo hace). Prueba reproducible con teclas inyectadas. El panel avisa ahora de las teclas que le llegan (`winkey_page_key`): al pulsar Windows se inyecta la tecla neutra (Windows ve un atajo y no abre la búsqueda) y al soltarla sin otra tecla cuenta como toque. Si el gancho está vivo se traga la tecla y la página no la ve, así que no se duplica.
+- La barra de tareas ya no crece a los lados: las aplicaciones en segundo plano son un botón con el contador y su lista (tarjetas con CPU y memoria) se despliega hacia arriba. La ventana crece hacia arriba (`taskbar_resize(width, height)`).
+- Energía: al abrirla se ocultan workspaces y apps y la barra solo muestra las acciones y «Volver».
+
+## D-104 · Acciones por aplicación, desenfoque estable y barra a su tamaño (1.6.0)
+
+- Cada tarjeta de segundo plano tiene «⋯» con acciones según la app: Abrir y Cerrar (con confirmación) para todas; «Silenciar app» si tiene sesión de audio (Core Audio por proceso); y un perfil propio: Discord (atajos globales ctrl+shift+m / ctrl+shift+d, que hay que poner igual en Discord → Combinaciones de teclas, porque Discord solo se deja controlar así sin registrar una aplicación), Wallpaper Engine (`-control pause/play/mute/unmute`), Spotify (teclas multimedia) y Steam (enlaces `steam://`). `app-actions.json` en la carpeta de configuración añade o reemplaza perfiles (`keys`, `exec` o `uri`). La interfaz solo manda exe + id; rutas, argumentos y enlaces salen del núcleo (`uri_allowed` rechaza file/javascript/data).
+- El desenfoque de la barra copia siempre la zona máxima de la isla (`glass_area`), no la de su ventana, y la vista la coloca según el tamaño actual: crecer o encogerse ya no vuelve a copiar (antes el fondo salía transparente unos segundos). La lista de segundo plano oculta su barra de desplazamiento sin perder el scroll.
+- El contenido de la barra ya no tiene `min-width: 100
+## D-104 · Acciones por aplicación, desenfoque estable y barra a su tamaño (1.6.0)
+
+- Cada tarjeta de segundo plano tiene «⋯» con acciones según la app: Abrir y Cerrar (con confirmación) para todas; «Silenciar app» si tiene sesión de audio (Core Audio por proceso); y un perfil propio: Discord (atajos globales ctrl+shift+m / ctrl+shift+d, que hay que poner igual en Discord → Combinaciones de teclas, porque Discord solo se deja controlar así sin registrar una aplicación), Wallpaper Engine (`-control pause/play/mute/unmute`), Spotify (teclas multimedia) y Steam (enlaces `steam://`). `app-actions.json` en la carpeta de configuración añade o reemplaza perfiles (`keys`, `exec` o `uri`). La interfaz solo manda exe + id; rutas, argumentos y enlaces salen del núcleo (`uri_allowed` rechaza file/javascript/data).
+- El desenfoque de la barra copia siempre la zona máxima de la isla (`glass_area`), no la de su ventana, y la vista la coloca según el tamaño actual: crecer o encogerse ya no vuelve a copiar (antes el fondo salía transparente unos segundos). La lista de segundo plano oculta su barra de desplazamiento sin perder el scroll.
+- El contenido de la barra ya no tiene `min-width: 100%`, que impedía que la isla encogiera tras haber crecido.
+
+## D-105 · Barra sin cortes, ventana emergente de acciones y documento teórico (1.7.0)
+
+- El botón de energía salía cortado al abrir la barra por primera vez: `getBoundingClientRect` incluye la escala (0,94) de la animación de aparición, así que la isla se fijaba un ~6 % más estrecha y el `ResizeObserver` no volvía a medir (el tamaño de diseño no cambia al acabar la animación). Ahora se mide `offsetWidth/offsetHeight` y además al terminar la animación.
+- Las acciones de una app en segundo plano salen en una ventana emergente propia (`popup`), sin foco (el foco de un WebView de Tesela deja sordos los ganchos de teclado), colocada junto al botón «⋯» (`popup_rect`), que se cierra al actuar, al volver a pulsar su botón, al cerrarse la barra o con un clic fuera (hilo que mira el botón del ratón). Sin desenfoque: tinte casi opaco. La barra ya no despliega nada dentro de la tarjeta.
+- Nuevo `docs/como-funciona.md`: explicación teórica de todo el proyecto.

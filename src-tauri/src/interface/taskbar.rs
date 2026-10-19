@@ -32,8 +32,13 @@ const HOVER_LEAVE: Duration = Duration::from_millis(450);
 static ENABLED: AtomicBool = AtomicBool::new(false);
 /// Una sola sincronización a la vez: si dos hilos crean la ventana de un monitor al mismo tiempo, la segunda falla.
 static SYNCING: Mutex<()> = Mutex::new(());
-/// Ancho (lógico) que pidió la vista de cada monitor.
-static WIDTHS: Mutex<Option<HashMap<u32, f64>>> = Mutex::new(None);
+/// Tamaño (lógico: ancho, alto) que pidió la vista de cada monitor. El alto crece hacia arriba cuando se despliega la
+/// lista de aplicaciones en segundo plano.
+static WIDTHS: Mutex<Option<HashMap<u32, (f64, f64)>>> = Mutex::new(None);
+
+fn requested_size(monitor: u32) -> (f64, f64) {
+    WIDTHS.lock().unwrap().as_ref().and_then(|w| w.get(&monitor).copied()).unwrap_or((MIN_WIDTH, ISLAND_HEIGHT))
+}
 /// Sube con cada despliegue: un cierre pendiente de otra generación se cancela.
 static GEN: AtomicU64 = AtomicU64::new(0);
 /// Monitores donde la barra está desplegada ahora.
@@ -59,11 +64,33 @@ fn hwnd_of(w: &tauri::WebviewWindow) -> Option<isize> {
 }
 
 /// Rectángulo físico de la isla en un monitor: centrada y separada del borde de abajo.
-pub fn island_rect(monitor: Rect, width_logical: f64, scale: f64) -> Rect {
+pub fn island_rect(monitor: Rect, width_logical: f64, height_logical: f64, scale: f64) -> Rect {
     let w = (width_logical.max(MIN_WIDTH) * scale).round() as i32;
-    let h = (ISLAND_HEIGHT * scale).round() as i32;
+    let h = (height_logical.max(ISLAND_HEIGHT) * scale).round() as i32;
     let margin = (BOTTOM_MARGIN * scale).round() as i32;
     Rect::new(monitor.x + (monitor.w - w) / 2, monitor.bottom() - margin - h, w, h)
+}
+
+/// Lado (lógico) máximo de la zona que la isla puede ocupar: ancho y alto (incluido el margen de abajo).
+pub const GLASS_MAX: (f64, f64) = (1000.0, 380.0);
+
+/// Zona de pantalla (física) que copia el desenfoque de la barra de un monitor: centrada, pegada al borde de abajo y del tamaño
+/// máximo de la isla (recortada a lo que quepa en el monitor). Depende solo del monitor, no del tamaño actual de la isla.
+/// `window` es el rectángulo actual de la ventana, que sirve para saber en qué monitor está.
+pub fn glass_area(window: Rect) -> Rect {
+    let cx = window.x + window.w / 2;
+    let cy = window.y + window.h / 2;
+    let m = list_monitors()
+        .into_iter()
+        .find(|m| cx >= m.bounds.x && cx < m.bounds.right() && cy >= m.bounds.y && cy < m.bounds.bottom());
+    let Some(m) = m else { return window };
+    glass_area_in(m.bounds, m.dpi_scale)
+}
+
+pub fn glass_area_in(monitor: Rect, scale: f64) -> Rect {
+    let w = ((GLASS_MAX.0 * scale).round() as i32).min(monitor.w);
+    let h = ((GLASS_MAX.1 * scale).round() as i32).min(monitor.h);
+    Rect::new(monitor.x + (monitor.w - w) / 2, monitor.bottom() - h, w, h)
 }
 
 /// ¿El cursor está en la zona del borde de abajo, en el centro, que despliega la barra?
@@ -92,8 +119,8 @@ pub fn is_shown(monitor: u32) -> bool {
 fn place(app: &AppHandle, monitor: u32) {
     let Some(window) = app.get_webview_window(&label(monitor)) else { return };
     let Some(m) = list_monitors().into_iter().find(|m| m.id == monitor) else { return };
-    let width = WIDTHS.lock().unwrap().as_ref().and_then(|w| w.get(&monitor).copied()).unwrap_or(MIN_WIDTH);
-    let r = island_rect(m.bounds, width, m.dpi_scale);
+    let (width, height) = requested_size(monitor);
+    let r = island_rect(m.bounds, width, height, m.dpi_scale);
     if let Some(h) = hwnd_of(&window) {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE};
@@ -127,6 +154,7 @@ pub fn hide(app: &AppHandle, monitor: u32) {
         return;
     }
     let Some(window) = app.get_webview_window(&label(monitor)) else { return };
+    crate::interface::popup::close(app);
     let _ = window.emit("wm-taskbar-closing", ());
     let generation = GEN.load(Ordering::SeqCst);
     let _ = std::thread::Builder::new().name("wm-taskbar-close".into()).spawn(move || {
@@ -138,6 +166,19 @@ pub fn hide(app: &AppHandle, monitor: u32) {
             crate::interface::webview::set_visible(&window, false);
         }
     });
+}
+
+/// Cierra la barra de un monitor salvo que el cursor esté sobre ella (entonces la cierra la lógica de hover al alejarse).
+pub fn hide_unless_hovered(app: &AppHandle, monitor: u32) {
+    if let (Some((cx, cy)), Some(m)) = (cursor_pos(), list_monitors().into_iter().find(|m| m.id == monitor)) {
+        let (width, height) = requested_size(monitor);
+        let r = island_rect(m.bounds, width, height, m.dpi_scale);
+        let pad = (28.0 * m.dpi_scale) as i32;
+        if cx >= r.x - pad && cx <= r.right() + pad && cy >= r.y - pad && cy <= m.bounds.bottom() {
+            return;
+        }
+    }
+    hide(app, monitor);
 }
 
 /// Despliega o cierra la barra de tareas de un monitor.
@@ -192,6 +233,8 @@ pub fn sync(app: &AppHandle, monitors: &[Monitor]) {
             Err(e) => eprintln!("[wm] no se pudo crear la barra de tareas {name}: {e}"),
         }
     }
+    // La ventana emergente de las apps en segundo plano es única y la comparten todas las barras.
+    crate::interface::popup::ensure(app);
 }
 
 fn remove_all(app: &AppHandle) {
@@ -201,14 +244,15 @@ fn remove_all(app: &AppHandle) {
         }
     }
     SHOWN.lock().unwrap().take();
+    crate::interface::popup::remove(app);
 }
 
 /// La vista avisa del ancho (lógico) que necesita su contenido.
-pub fn resize(app: &AppHandle, monitor: u32, width: f64) {
-    if !width.is_finite() {
+pub fn resize(app: &AppHandle, monitor: u32, width: f64, height: f64) {
+    if !width.is_finite() || !height.is_finite() {
         return;
     }
-    WIDTHS.lock().unwrap().get_or_insert_with(HashMap::new).insert(monitor, width.clamp(MIN_WIDTH, 4000.0));
+    WIDTHS.lock().unwrap().get_or_insert_with(HashMap::new).insert(monitor, (width.clamp(MIN_WIDTH, 4000.0), height.clamp(ISLAND_HEIGHT, 900.0)));
     place(app, monitor);
 }
 
@@ -216,6 +260,7 @@ pub fn resize(app: &AppHandle, monitor: u32, width: f64) {
 pub fn set_fullscreen(app: &AppHandle, monitor: u32, fullscreen: bool) {
     set_change(&FULLSCREEN, monitor, fullscreen);
     if fullscreen && set_change(&SHOWN, monitor, false) {
+        crate::interface::popup::close(app);
         GEN.fetch_add(1, Ordering::SeqCst);
         if let Some(window) = app.get_webview_window(&label(monitor)) {
             if let Some(h) = hwnd_of(&window) {
@@ -260,8 +305,8 @@ pub fn start_hover_trigger(app: &AppHandle) {
                     outside_since.remove(&m.id);
                     continue;
                 }
-                let width = WIDTHS.lock().unwrap().as_ref().and_then(|w| w.get(&m.id).copied()).unwrap_or(MIN_WIDTH);
-                let r = island_rect(m.bounds, width, m.dpi_scale);
+                let (width, height) = requested_size(m.id);
+                let r = island_rect(m.bounds, width, height, m.dpi_scale);
                 let pad = (28.0 * m.dpi_scale) as i32;
                 let inside = cx >= r.x - pad && cx <= r.right() + pad && cy >= r.y - pad && cy <= m.bounds.bottom();
                 if inside {
@@ -306,15 +351,31 @@ mod tests {
     #[test]
     fn la_isla_se_centra_en_el_monitor_y_se_separa_del_borde_de_abajo() {
         let monitor = Rect::new(0, 0, 1920, 1080);
-        let r = island_rect(monitor, 400.0, 1.0);
+        let r = island_rect(monitor, 400.0, ISLAND_HEIGHT, 1.0);
         assert_eq!((r.x, r.w, r.h), (760, 400, 48));
         assert_eq!(r.bottom(), 1080 - 14, "deja el margen por debajo");
     }
 
     #[test]
+    fn la_zona_del_desenfoque_no_depende_del_tamano_de_la_isla_y_cabe_en_el_monitor() {
+        let m = Rect::new(1920, 0, 2560, 1440);
+        let a = glass_area_in(m, 1.5);
+        assert_eq!((a.w, a.h), (1500, 570));
+        assert_eq!(a.bottom(), m.bottom());
+        assert_eq!(a.x + a.w / 2, m.x + m.w / 2);
+        let small = Rect::new(0, 0, 800, 300);
+        let b = glass_area_in(small, 1.0);
+        assert_eq!((b.w, b.h), (800, 300), "recortada al monitor");
+        // La isla (en cualquier tamaño válido) cae dentro de la zona.
+        let island = island_rect(Rect::new(0, 0, 1920, 1080), 417.0, 312.0, 1.0);
+        let area = glass_area_in(Rect::new(0, 0, 1920, 1080), 1.0);
+        assert!(island.x >= area.x && island.right() <= area.right() && island.y >= area.y && island.bottom() <= area.bottom());
+    }
+
+    #[test]
     fn con_escala_se_multiplica_y_nunca_baja_del_minimo() {
         let monitor = Rect::new(1920, 0, 2560, 1440);
-        let r = island_rect(monitor, 10.0, 1.5);
+        let r = island_rect(monitor, 10.0, ISLAND_HEIGHT, 1.5);
         assert_eq!(r.w, 180, "el ancho mínimo (120) por la escala");
         assert_eq!(r.h, 72);
         assert_eq!(r.x + r.w / 2, 1920 + 1280, "centrada en el monitor");
@@ -348,7 +409,7 @@ mod tests {
         let caps: serde_json::Value = serde_json::from_str(include_str!("../../capabilities/default.json")).unwrap();
         let patterns: Vec<&str> = caps["windows"].as_array().unwrap().iter().filter_map(|w| w.as_str()).collect();
         let covered = |label: &str| patterns.iter().any(|p| p.strip_suffix('*').map_or(*p == label, |prefix| label.starts_with(prefix)));
-        for label in [label(7), "bar-7".to_string(), "panel".to_string(), "focus-border".to_string(), "main".to_string()] {
+        for label in [label(7), crate::interface::popup::LABEL.to_string(), "bar-7".to_string(), "panel".to_string(), "focus-border".to_string(), "main".to_string()] {
             assert!(covered(&label), "falta «{label}» en capabilities/default.json");
         }
     }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { merida } from "../stores/weather";
   import { refreshWallpaperTheme } from "../stores/theme";
+  import { invoke } from "@tauri-apps/api/core";
   import { onDestroy, onMount } from "svelte";
   import { closePanel, onPanelClosing, onPanelShown, panelResize } from "../api/state";
   import { audioApi, notesApi, systemApi } from "../api/system";
@@ -41,7 +42,31 @@
     clock = setInterval(() => !isHidden() && (now = new Date()), 1000);
     stopShown = onShown(() => (now = new Date()));
     systemApi.mode().then((m) => (mode = m)).catch(() => {});
-    return stopBorderSync;
+    // El WebView toma el foco de teclado al hacer clic: se refresca el gancho de la tecla Windows (si no, Windows abría su búsqueda).
+    const refreshKeys = () => void invoke("winkey_refresh").catch(() => {});
+    window.addEventListener("pointerdown", refreshKeys, true);
+    window.addEventListener("focus", refreshKeys);
+    // Con el panel en uso Windows no llama a los ganchos de teclado: si la tecla Windows llega a la página, se avisa al núcleo
+    // para que no se abra la búsqueda de Windows y para que cuente como toque (ver `winkey::page_key`).
+    const keyKind = (e: KeyboardEvent, down: boolean) => (e.key === "Meta" ? (down ? "win_down" : "win_up") : e.key === "Unidentified" || e.keyCode === 232 ? null : "other");
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Meta" && e.repeat) return;
+      const k = keyKind(e, true);
+      if (k) void invoke("winkey_page_key", { kind: k }).catch(() => {});
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      const k = keyKind(e, false);
+      if (k === "win_up") void invoke("winkey_page_key", { kind: k }).catch(() => {});
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+      stopBorderSync();
+      window.removeEventListener("pointerdown", refreshKeys, true);
+      window.removeEventListener("focus", refreshKeys);
+    };
   });
 
   onDestroy(() => {
@@ -105,7 +130,6 @@
   onVolume={(p) => void after(systemApi.volumeSet(p), volume.refresh).catch(() => {})}
   onMute={(m) => void after(systemApi.volumeMute(m), volume.refresh).catch(() => {})}
   onRadio={(k, on): Promise<ActionOutcome> => after(systemApi.radioSet(k, on), refreshRadios)}
-  onPower={(a): Promise<ActionOutcome> => systemApi.powerRun(a)}
   network={systemApi}
   notes={notesApi}
   tasks={tasksApi}

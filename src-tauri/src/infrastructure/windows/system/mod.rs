@@ -1,6 +1,9 @@
 //! Adaptadores de Windows para los módulos de sistema y de acción (Fase 6).
 
+pub mod app_actions;
+pub mod app_audio;
 pub mod apps;
+pub mod background;
 pub mod clipboard;
 pub mod installed_apps;
 pub mod media;

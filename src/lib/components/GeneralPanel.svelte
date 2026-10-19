@@ -115,6 +115,10 @@
         <input type="checkbox" checked={shellNow.win_key_panel} onchange={(e) => changeShell({ win_key_panel: (e.currentTarget as HTMLInputElement).checked })} />
         La tecla Windows abre el panel de Tesela (los atajos con Windows, como Win+Shift+S, siguen igual)
       </label>
+      <label class="check">
+        <input type="checkbox" checked={shellNow.show_background} onchange={(e) => changeShell({ show_background: (e.currentTarget as HTMLInputElement).checked })} />
+        Mostrar en la barra de tareas las aplicaciones en segundo plano (Wallpaper Engine, Discord…)
+      </label>
       <p class="hint">Al cerrar Tesela, la barra de tareas y la tecla Windows vuelven a ser las de siempre.</p>
     </section>
   {/if}

@@ -101,7 +101,7 @@ pub fn step(state: &mut Keys, key: Key, down: bool) -> Verdict {
 
 /// Marca de las teclas que inyecta la propia Tesela: el gancho las deja pasar sin examinarlas. Las inyectadas por otros
 /// programas (remapeadores, teclados con software propio) sí se examinan: también pueden abrir Inicio.
-const OWN_TAG: usize = 0x7E5E1A;
+pub const OWN_TAG: usize = 0x7E5E1A;
 
 /// Entrega a Windows la pulsación de su tecla que se había retenido (inyectada), para que el atajo funcione.
 fn press_win(win_vk: u16) {
@@ -111,6 +111,54 @@ fn press_win(win_vk: u16) {
     };
     unsafe {
         SendInput(&[input], size_of::<INPUT>() as i32);
+    }
+}
+
+/// Tecla «sin asignar» que Windows ignora: entre Windows pulsada y soltada, evita que se abra Inicio o la búsqueda.
+const MASK_KEY: u16 = 0xE8;
+
+fn press_mask() {
+    let key = |flags| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VIRTUAL_KEY(MASK_KEY), dwFlags: flags, dwExtraInfo: OWN_TAG, ..Default::default() } },
+    };
+    unsafe {
+        SendInput(&[key(Default::default()), key(windows::Win32::UI::Input::KeyboardAndMouse::KEYEVENTF_KEYUP)], size_of::<INPUT>() as i32);
+    }
+}
+
+static PAGE_WIN_DOWN: AtomicBool = AtomicBool::new(false);
+static PAGE_COMBO: AtomicBool = AtomicBool::new(false);
+static LAST_TAP_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Respaldo cuando el gancho no recibe la tecla (con el panel en uso, Windows no llama a los ganchos): el propio panel
+/// avisa de las teclas que le llegan. Al pulsar Windows se inyecta la tecla neutra para que Windows lo vea como un atajo y
+/// no abra su búsqueda; al soltarla sin otra tecla en medio se cuenta como un toque. `kind`: `win_down`, `win_up` u `other`.
+pub fn page_key(kind: &str) {
+    let now = now_ms() as u64;
+    match kind {
+        "win_down" => {
+            if !PAGE_WIN_DOWN.swap(true, Ordering::SeqCst) {
+                PAGE_COMBO.store(false, Ordering::SeqCst);
+                press_mask();
+                log(format!("[{}] respaldo del panel: Windows pulsada (se inyecta la tecla neutra)", now));
+            }
+        }
+        "win_up" => {
+            if PAGE_WIN_DOWN.swap(false, Ordering::SeqCst) && !PAGE_COMBO.load(Ordering::SeqCst) {
+                // Si el gancho ya contó este toque (llegaron las dos vías), no se repite.
+                let hooked = LAST_TAP_MS.load(Ordering::SeqCst);
+                if now.wrapping_sub(hooked) > 600 || now < hooked {
+                    log(format!("[{}] respaldo del panel: toque de Windows", now));
+                    fire();
+                }
+            }
+        }
+        _ => {
+            if PAGE_WIN_DOWN.load(Ordering::SeqCst) {
+                PAGE_COMBO.store(true, Ordering::SeqCst);
+            }
+        }
     }
 }
 
@@ -211,6 +259,7 @@ unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRE
                 }
                 match verdict {
                     Verdict::Tap => {
+                        LAST_TAP_MS.store(now_ms() as u64, Ordering::SeqCst);
                         fire();
                         return LRESULT(1);
                     }

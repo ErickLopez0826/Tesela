@@ -6,7 +6,20 @@
   import { onWallpaperChanged } from "../stores/theme";
 
   /** `onLuma`: avisa de la luminosidad (0 a 1) de lo que hay detrás, para elegir un texto que se lea (aunque no haya desenfoque). */
-  let { kind, blur, tick = 0, onLuma }: { kind: "bar" | "panel"; blur: number; tick?: number; onLuma?: (luma: number | null) => void } = $props();
+  let {
+    kind,
+    blur,
+    tick = 0,
+    onLuma,
+    anchored = null,
+  }: {
+    kind: "bar" | "panel";
+    blur: number;
+    tick?: number;
+    onLuma?: (luma: number | null) => void;
+    /** Isla de la barra de tareas: la imagen cubre la zona máxima y se coloca según el tamaño actual (centrada, pegada abajo). */
+    anchored?: { gap: number } | null;
+  } = $props();
 
   /** Desenfoque con el que se pide la copia cuando solo hace falta para medir su luminosidad. */
   const TONE_BLUR = 20;
@@ -67,11 +80,24 @@
 </script>
 
 {#if image}
-  <img class="glass" src={image.url} alt="" draggable="false" style:width={`${image.width / scale}px`} style:height={`${image.height / scale}px`} />
+  <img
+    class="glass"
+    class:anchored={anchored !== null}
+    src={image.url}
+    alt=""
+    draggable="false"
+    style:width={`${image.width / scale}px`}
+    style:height={`${image.height / scale}px`}
+    style:--iw={`${image.width / scale}px`}
+    style:--ih={`${image.height / scale}px`}
+    style:--gap={anchored ? `${anchored.gap}px` : undefined}
+  />
 {/if}
 
 <style>
   .glass { position: absolute; left: 0; top: 0; z-index: 0; max-width: none; pointer-events: none; user-select: none; animation: glass-in 0.35s ease both; }
+  /* Sobre la isla: el borde de abajo de la isla queda `gap` por encima del de la imagen y el centro coincide; sigue su tamaño. */
+  .glass.anchored { left: calc((100% - var(--iw)) / 2); top: calc(100% + var(--gap) - var(--ih)); }
   @keyframes glass-in { from { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) { .glass { animation: none; } }
 </style>

@@ -38,6 +38,13 @@ export function windowLabel(w: WindowSnapshot): string {
   return w.title.trim() || w.exe;
 }
 
+/** Texto de ayuda de una aplicación en segundo plano: nombre, CPU y memoria. */
+export function backgroundLabel(a: { name: string; cpu_percent: number; ram_bytes: number; processes: number }, bytes: (n: number) => string): string {
+  const cpu = a.cpu_percent < 10 && a.cpu_percent > 0 ? a.cpu_percent.toFixed(1) : Math.round(a.cpu_percent);
+  const procs = a.processes > 1 ? ` · ${a.processes} procesos` : "";
+  return `${a.name} · CPU ${cpu}% · ${bytes(a.ram_bytes)}${procs}`;
+}
+
 const icons = new Map<string, Promise<string | null>>();
 
 /** Pide el icono una sola vez por clave. Un fallo no se recuerda (puede que la ventana aún no tuviera icono). */
@@ -46,6 +53,17 @@ export function loadIcon(w: WindowSnapshot, ask: (handle: number, key: string) =
   const hit = icons.get(key);
   if (hit) return hit;
   const pending = ask(w.id, key).catch(() => null);
+  icons.set(key, pending);
+  void pending.then((url) => url === null && icons.get(key) === pending && icons.delete(key));
+  return pending;
+}
+
+/** Icono de un ejecutable (aplicaciones en segundo plano), pedido una vez por ruta. */
+export function loadExeIcon(path: string, ask: (path: string) => Promise<string | null>): Promise<string | null> {
+  const key = `exe:${path}`;
+  const hit = icons.get(key);
+  if (hit) return hit;
+  const pending = ask(path).catch(() => null);
   icons.set(key, pending);
   void pending.then((url) => url === null && icons.get(key) === pending && icons.delete(key));
   return pending;

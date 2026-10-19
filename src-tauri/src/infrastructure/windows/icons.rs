@@ -160,7 +160,11 @@ pub fn app_icon_png(handle: isize) -> Option<Vec<u8>> {
     if let Some(png) = window_icon(handle).and_then(icon_png) {
         return Some(png);
     }
-    let path = exe_path_of(handle)?;
+    exe_icon_png(&exe_path_of(handle)?)
+}
+
+/// PNG del icono de un ejecutable.
+pub fn exe_icon_png(path: &str) -> Option<Vec<u8>> {
     let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
         let mut info = SHFILEINFOW::default();
@@ -172,6 +176,19 @@ pub fn app_icon_png(handle: isize) -> Option<Vec<u8>> {
         let _ = DestroyIcon(info.hIcon);
         png
     }
+}
+
+/// URL de datos con el icono de un ejecutable (se calcula una vez por ruta).
+pub fn exe_icon_url(path: &str) -> Option<String> {
+    let key = format!("exe:{path}");
+    if let Some(hit) = CACHE.lock().unwrap().as_ref().and_then(|c| c.get(&key)) {
+        return hit.clone();
+    }
+    let url = exe_icon_png(path).map(|bytes| format!("data:image/png;base64,{}", base64(&bytes)));
+    if url.is_some() {
+        CACHE.lock().unwrap().get_or_insert_with(HashMap::new).insert(key, url.clone());
+    }
+    url
 }
 
 static CACHE: Mutex<Option<HashMap<String, Option<String>>>> = Mutex::new(None);

@@ -20,7 +20,6 @@ const base = {
   onVolume: noop,
   onMute: noop,
   onRadio: vi.fn().mockResolvedValue({ simulated: true, description: "" }),
-  onPower: vi.fn().mockResolvedValue({ simulated: true, description: "" }),
   onWallpaper: vi.fn().mockResolvedValue({ simulated: false, description: "" }),
 };
 
@@ -83,7 +82,6 @@ describe("PanelView", () => {
       ["Controles", "Conectividad"],
       ["Estadísticas", "Estadísticas"],
       ["Fondos", "Fondos de pantalla"],
-      ["Energía", /Energía/],
     ];
     for (const [tab, content] of tabs) {
       await fireEvent.click(screen.getByRole("button", { name: tab }));
