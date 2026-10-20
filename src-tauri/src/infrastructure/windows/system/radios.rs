@@ -13,6 +13,11 @@ use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 use crate::application::system::RadioControl;
 use crate::domain::system::{ActionOutcome, RadioKind, RadioState};
 
+/// Tipos de interfaz IANA que son cable: Ethernet (6), Fast Ethernet (62 y 69) y Gigabit Ethernet (117). El Wi-Fi es 71.
+pub fn is_ethernet_type(iana: u32) -> bool {
+    matches!(iana, 6 | 62 | 69 | 117)
+}
+
 pub struct WinRtRadios;
 
 impl WinRtRadios {
@@ -41,6 +46,18 @@ impl WinRtRadios {
             (RadioKind::Bluetooth, Ok(k)) => k == WinKind::Bluetooth,
             _ => false,
         }
+    }
+
+    /// ¿El equipo sale a internet por cable? Se mira el perfil de conexión a internet del sistema (el que Windows usa de verdad,
+    /// aunque también haya Wi-Fi) y que tenga conexión.
+    fn internet_by_cable() -> bool {
+        use windows::Networking::Connectivity::NetworkConnectivityLevel;
+        Self::init();
+        let Ok(profile) = NetworkInformation::GetInternetConnectionProfile() else { return false };
+        if profile.GetNetworkConnectivityLevel().is_ok_and(|l| l == NetworkConnectivityLevel::None) {
+            return false;
+        }
+        profile.NetworkAdapter().and_then(|a| a.IanaInterfaceType()).is_ok_and(is_ethernet_type)
     }
 
     /// Barras de señal (0 a 5) de la red Wi-Fi a la que está conectado el equipo; `None` si no hay ninguna conectada.
@@ -78,6 +95,7 @@ impl Default for WinRtRadios {
 impl RadioControl for WinRtRadios {
     fn states(&mut self) -> Vec<RadioState> {
         let radios = Self::radios();
+        let ethernet = Self::internet_by_cable();
         let mut out = Vec::new();
         for kind in [RadioKind::Wifi, RadioKind::Bluetooth] {
             let radio = radios.iter().find(|r| Self::matches(kind, r));
@@ -88,6 +106,7 @@ impl RadioControl for WinRtRadios {
                 on,
                 // La señal solo se pregunta con el Wi-Fi encendido: apagado no hay conexión que medir.
                 signal: if kind == RadioKind::Wifi && on { Self::wifi_bars() } else { None },
+                ethernet: kind == RadioKind::Wifi && ethernet,
             });
         }
         let hotspot = Self::tethering();
@@ -95,6 +114,7 @@ impl RadioControl for WinRtRadios {
             kind: RadioKind::Hotspot,
             available: hotspot.is_some(),
             signal: None,
+            ethernet: false,
             on: hotspot
                 .and_then(|m| m.TetheringOperationalState().ok())
                 .is_some_and(|s| s == TetheringOperationalState::On),
@@ -148,11 +168,23 @@ mod tests {
         assert_eq!(states[1].kind, RadioKind::Bluetooth);
         assert_eq!(states[2].kind, RadioKind::Hotspot);
         assert!(states.iter().all(|s| s.available || !s.on), "algo no disponible no puede estar encendido");
+        // «Por cable» solo se informa en la ficha de Wi-Fi.
+        assert!(states[1..].iter().all(|s| !s.ethernet));
         // La señal solo existe para el Wi-Fi encendido, y va de 0 a 5 barras.
         assert!(states[1..].iter().all(|s| s.signal.is_none()));
         if !states[0].on {
             assert_eq!(states[0].signal, None);
         }
         assert!(states[0].signal.is_none_or(|bars| bars <= 5), "barras fuera de rango: {:?}", states[0].signal);
+    }
+
+    #[test]
+    fn el_cable_se_reconoce_por_el_tipo_de_interfaz_y_el_wifi_no_es_cable() {
+        for iana in [6, 62, 69, 117] {
+            assert!(is_ethernet_type(iana), "{iana}");
+        }
+        for iana in [71, 24, 131, 0] {
+            assert!(!is_ethernet_type(iana), "{iana}");
+        }
     }
 }

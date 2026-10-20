@@ -91,6 +91,8 @@ pub struct RadioState {
     pub on: bool,
     /// Intensidad de la señal, de 0 a 5 barras: solo el Wi-Fi y solo si está conectado a una red. `None` en lo demás.
     pub signal: Option<u8>,
+    /// Solo en el Wi-Fi: el equipo sale a internet por **cable** (Ethernet). Es independiente de que haya o no antena Wi-Fi.
+    pub ethernet: bool,
 }
 
 /// Red Wi-Fi a la vista (una por nombre, con la mejor señal).
