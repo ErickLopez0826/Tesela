@@ -57,7 +57,7 @@
     }
   });
 
-  // La ventana se reutiliza: cada vez que se abre, el cuadro empieza vacío (con lo más usado debajo) y enfocado.
+  // La ventana se reutiliza: cada vez que se abre, el cuadro empieza vacío y enfocado, sin nada debajo hasta que se escriba.
   let lastReset = -1;
   $effect(() => {
     const opened = openTick;
@@ -70,6 +70,13 @@
 
   async function run(q: string) {
     const mine = ++seq;
+    // Con el cuadro vacío solo se ve el cuadro: ni lista ni pie. (Y así la ventana no se queda con restos de la lista anterior.)
+    if (!q.trim()) {
+      items = [];
+      selected = -1;
+      error = null;
+      return;
+    }
     try {
       const found = await api.query(q);
       if (mine !== seq) return; // llegó una consulta más nueva: esta ya no sirve

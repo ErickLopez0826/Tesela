@@ -1,14 +1,14 @@
 //! La tecla Windows: tocarla sola nunca llega a Windows (jamás se abre Inicio) y hace lo que Tesela decida (su panel). Los atajos que combinan
-//! Windows con otra tecla (Win+Shift+S para capturas, Win+V, Win+D…) siguen funcionando igual; también se anula Ctrl+Esc,
-//! que abre Inicio. Es un gancho de teclado de bajo nivel que vive solo mientras Tesela corre.
+//! Windows con otra tecla (Win+Shift+S para capturas, Win+V, Win+D…) siguen funcionando igual. Solo la tecla Windows hace
+//! algo: Esc (con o sin Ctrl) pasa siempre tal cual. Es un gancho de teclado de bajo nivel que vive solo mientras Tesela corre.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, VIRTUAL_KEY, VK_CONTROL, VK_ESCAPE, VK_LCONTROL, VK_LWIN,
-    VK_RCONTROL, VK_RWIN,
+    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, VIRTUAL_KEY, VK_CONTROL, VK_LCONTROL, VK_LWIN, VK_RCONTROL,
+    VK_RWIN,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage, KBDLLHOOKSTRUCT, MSG,
@@ -19,7 +19,6 @@ static ENABLED: AtomicBool = AtomicBool::new(false);
 static WIN_DOWN: AtomicBool = AtomicBool::new(false);
 /// Se pulsó otra tecla mientras Windows estaba pulsada: es un atajo, no un toque.
 static COMBO: AtomicBool = AtomicBool::new(false);
-static CTRL_DOWN: AtomicBool = AtomicBool::new(false);
 static STARTED: AtomicBool = AtomicBool::new(false);
 static ON_TAP: Mutex<Option<Arc<dyn Fn() + Send + Sync>>> = Mutex::new(None);
 
@@ -28,7 +27,6 @@ static ON_TAP: Mutex<Option<Arc<dyn Fn() + Send + Sync>>> = Mutex::new(None);
 pub struct Keys {
     pub win_down: bool,
     pub combo: bool,
-    pub ctrl_down: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,9 +37,7 @@ pub enum Verdict {
     Tap,
     /// Se pulsó otra tecla con Windows retenida: se entrega a Windows la pulsación que se había retenido y luego la tecla.
     ReleaseWinThenPass,
-    /// Ctrl+Esc: se traga la tecla y se avisa.
-    SwallowAndFire,
-    /// El soltado de Esc de un Ctrl+Esc ya tragado.
+    /// Se traga la tecla (la pulsación de Windows, retenida hasta saber si es un atajo).
     Swallow,
 }
 
@@ -49,7 +45,6 @@ pub enum Verdict {
 pub enum Key {
     Win,
     Ctrl,
-    Esc,
     Other,
 }
 
@@ -57,7 +52,6 @@ pub fn classify(vk: u32) -> Key {
     match VIRTUAL_KEY(vk as u16) {
         VK_LWIN | VK_RWIN => Key::Win,
         VK_CONTROL | VK_LCONTROL | VK_RCONTROL => Key::Ctrl,
-        VK_ESCAPE => Key::Esc,
         _ => Key::Other,
     }
 }
@@ -79,16 +73,13 @@ pub fn step(state: &mut Keys, key: Key, down: bool) -> Verdict {
             if tap { Verdict::Tap } else { Verdict::Pass }
         }
         (Key::Ctrl, d) => {
-            state.ctrl_down = d;
             if d && state.win_down && !state.combo {
                 state.combo = true;
                 return Verdict::ReleaseWinThenPass;
             }
             Verdict::Pass
         }
-        (Key::Esc, true) if state.ctrl_down && !state.win_down => Verdict::SwallowAndFire,
-        (Key::Esc, false) if state.ctrl_down && !state.win_down => Verdict::Swallow,
-        (Key::Other | Key::Esc, true) => {
+        (Key::Other, true) => {
             if state.win_down && !state.combo {
                 state.combo = true;
                 return Verdict::ReleaseWinThenPass;
@@ -235,7 +226,7 @@ pub fn is_enabled() -> bool {
 /// La última tecla Windows pulsada (izquierda o derecha), para entregarla si resulta ser un atajo.
 static WIN_VK: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0x5B);
 
-static STATE: Mutex<Keys> = Mutex::new(Keys { win_down: false, combo: false, ctrl_down: false });
+static STATE: Mutex<Keys> = Mutex::new(Keys { win_down: false, combo: false });
 
 unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code >= 0 && ENABLED.load(Ordering::SeqCst) {
@@ -253,7 +244,6 @@ unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRE
                 let verdict = step(&mut STATE.lock().unwrap(), key, down);
                 WIN_DOWN.store(STATE.lock().unwrap().win_down, Ordering::SeqCst);
                 COMBO.store(STATE.lock().unwrap().combo, Ordering::SeqCst);
-                CTRL_DOWN.store(STATE.lock().unwrap().ctrl_down, Ordering::SeqCst);
                 if key == Key::Win || verdict != Verdict::Pass {
                     log(format!("[{}] ", now_ms()) + &format!("{:?} vk={:#x} {} flags={:#x} extra={:#x} -> {verdict:?}", key, k.vkCode, if down { "abajo" } else { "arriba" }, k.flags.0, k.dwExtraInfo));
                 }
@@ -264,10 +254,6 @@ unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRE
                         return LRESULT(1);
                     }
                     Verdict::ReleaseWinThenPass => press_win(WIN_VK.load(Ordering::SeqCst)),
-                    Verdict::SwallowAndFire => {
-                        fire();
-                        return LRESULT(1);
-                    }
                     Verdict::Swallow => return LRESULT(1),
                     Verdict::Pass => {}
                 }
@@ -382,9 +368,10 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_esc_se_traga_y_avisa_pero_esc_solo_pasa() {
-        let v = run(&[(Key::Ctrl, true), (Key::Esc, true), (Key::Esc, false), (Key::Ctrl, false), (Key::Esc, true), (Key::Esc, false)]);
-        assert_eq!(v, [Verdict::Pass, Verdict::SwallowAndFire, Verdict::Swallow, Verdict::Pass, Verdict::Pass, Verdict::Pass]);
+    fn esc_nunca_se_toca_ni_con_control_ni_con_control_atascado() {
+        // Ctrl+Esc abre Inicio en Windows, pero Esc no es de Tesela: pasa siempre (la red de seguridad cierra Inicio si se abre).
+        assert_eq!(run(&[(Key::Ctrl, true), (Key::Other, true), (Key::Other, false), (Key::Ctrl, false), (Key::Other, true)]), [Verdict::Pass; 5]);
+        assert_eq!(classify(0x1B), Key::Other);
     }
 
     #[test]
@@ -409,7 +396,6 @@ mod tests {
         assert_eq!(classify(0x5B), Key::Win);
         assert_eq!(classify(0x5C), Key::Win);
         assert_eq!(classify(0xA2), Key::Ctrl);
-        assert_eq!(classify(0x1B), Key::Esc);
         assert_eq!(classify(0x41), Key::Other);
     }
 }

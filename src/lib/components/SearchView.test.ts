@@ -24,21 +24,34 @@ const box = () => screen.getByRole("combobox") as HTMLInputElement;
 const rows = () => screen.queryAllByRole("option");
 const keys = (key: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(window, { key, ...init });
 
+/** Abre el buscador y escribe algo: con el cuadro vacío no hay resultados. */
+async function show(props: Parameters<typeof render<typeof SearchView>>[1], text = "s") {
+  const view = render(SearchView, props);
+  await fireEvent.input(box(), { target: { value: text } });
+  return view;
+}
+
 afterEach(cleanup);
 
 describe("SearchView", () => {
-  it("al abrir pide lo más usado, deja el primer resultado seleccionado y enfoca el cuadro", async () => {
+  it("al abrir solo enseña el cuadro (sin lista ni pie) y lo enfoca; al escribir deja el primer resultado seleccionado", async () => {
     const a = api();
     render(SearchView, { api: a });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(a.query).not.toHaveBeenCalled();
+    expect(rows()).toHaveLength(0);
+    expect(document.querySelector(".results, .keys, .none")).toBeNull();
+    expect(document.activeElement).toBe(box());
+    await fireEvent.input(box(), { target: { value: "s" } });
     await waitFor(() => expect(rows()).toHaveLength(3));
-    expect(a.query).toHaveBeenCalledWith("");
+    expect(a.query).toHaveBeenCalledWith("s");
     expect(rows()[0].getAttribute("aria-selected")).toBe("true");
     expect(rows()[1].getAttribute("aria-selected")).toBe("false");
     expect(document.activeElement).toBe(box());
   });
 
   it("cada resultado enseña su nombre y su línea secundaria, y las abiertas llevan un punto", async () => {
-    render(SearchView, { api: api() });
+    await show({ api: api() });
     await waitFor(() => expect(rows()).toHaveLength(3));
     expect(rows()[0].textContent).toContain("Spotify");
     expect(rows()[0].textContent).toContain("En ejecución");
@@ -56,7 +69,7 @@ describe("SearchView", () => {
 
   it("si llega tarde la respuesta de una consulta vieja, se descarta", async () => {
     let slow!: (v: SearchItem[]) => void;
-    const query = vi.fn().mockResolvedValueOnce([]).mockImplementationOnce(() => new Promise<SearchItem[]>((r) => (slow = r))).mockResolvedValueOnce([item("n1", "Nueva")]);
+    const query = vi.fn().mockImplementationOnce(() => new Promise<SearchItem[]>((r) => (slow = r))).mockResolvedValueOnce([item("n1", "Nueva")]);
     render(SearchView, { api: api({ query }) });
     await fireEvent.input(box(), { target: { value: "a" } });
     await fireEvent.input(box(), { target: { value: "ab" } });
@@ -67,7 +80,7 @@ describe("SearchView", () => {
   });
 
   it("las flechas mueven la selección y dan la vuelta en los extremos", async () => {
-    render(SearchView, { api: api() });
+    await show({ api: api() });
     await waitFor(() => expect(rows()).toHaveLength(3));
     const selected = () => rows().findIndex((r) => r.getAttribute("aria-selected") === "true");
     await keys("ArrowDown");
@@ -81,7 +94,7 @@ describe("SearchView", () => {
 
   it("Enter abre el resultado elegido y ctrl+Enter lo abre como administrador", async () => {
     const a = api();
-    render(SearchView, { api: a });
+    await show({ api: a });
     await waitFor(() => expect(rows()).toHaveLength(3));
     await keys("ArrowDown");
     await keys("Enter");
@@ -99,7 +112,7 @@ describe("SearchView", () => {
 
   it("hacer clic en un resultado lo abre, y pasar el cursor lo resalta", async () => {
     const a = api();
-    render(SearchView, { api: a });
+    await show({ api: a });
     await waitFor(() => expect(rows()).toHaveLength(3));
     await fireEvent.mouseMove(rows()[2]);
     expect(rows()[2].getAttribute("aria-selected")).toBe("true");
@@ -118,19 +131,19 @@ describe("SearchView", () => {
 
   it("si abrir falla se enseña el motivo", async () => {
     const a = api({ open: vi.fn().mockRejectedValue("no se pudo abrir") });
-    render(SearchView, { api: a });
+    await show({ api: a });
     await waitFor(() => expect(rows()).toHaveLength(3));
     await keys("Enter");
     expect((await screen.findByRole("alert")).textContent).toContain("no se pudo abrir");
   });
 
   it("si la búsqueda falla se enseña el motivo y no queda nada seleccionado", async () => {
-    render(SearchView, { api: api({ query: vi.fn().mockRejectedValue("fallo del núcleo") }) });
+    await show({ api: api({ query: vi.fn().mockRejectedValue("fallo del núcleo") }) });
     expect((await screen.findByRole("alert")).textContent).toContain("fallo del núcleo");
     expect(rows()).toHaveLength(0);
   });
 
-  it("cada vez que se abre vacía el cuadro, vuelve a pedir lo más usado y lo enfoca", async () => {
+  it("cada vez que se abre vacía el cuadro y la lista, no pide nada y lo enfoca", async () => {
     const a = api();
     const { rerender } = render(SearchView, { api: a, openTick: 0 });
     await fireEvent.input(box(), { target: { value: "spot" } });
@@ -138,7 +151,8 @@ describe("SearchView", () => {
     box().blur();
     await rerender({ api: a, openTick: 1 });
     await waitFor(() => expect(box().value).toBe(""));
-    expect(a.query).toHaveBeenLastCalledWith("");
+    expect(a.query).toHaveBeenLastCalledWith("spot");
+    expect(rows()).toHaveLength(0);
     expect(document.activeElement).toBe(box());
   });
 
@@ -157,7 +171,7 @@ describe("SearchView", () => {
   it("pide el icono de las aplicaciones una sola vez por nombre y usa letras si no llega", async () => {
     const icon = vi.fn().mockImplementation((id: string) => Promise.resolve(id === "r1" ? "data:image/png;base64,AAA" : null));
     const a = api({ icon });
-    render(SearchView, { api: a });
+    await show({ api: a });
     await waitFor(() => expect(rows()[0].querySelector("img")).not.toBeNull());
     expect(rows()[0].querySelector("img")!.getAttribute("src")).toBe("data:image/png;base64,AAA");
     expect(rows()[1].querySelector(".fallback")!.textContent).toBe("S");
@@ -172,7 +186,7 @@ describe("SearchView", () => {
   it("las redirecciones y las búsquedas web llevan su propio icono y no piden uno al núcleo", async () => {
     const icon = vi.fn().mockResolvedValue(null);
     const found = [item("w1", "Buscar «gatos»", "web_search", "Búsqueda web en google.com"), item("w2", "Abrir claude.com", "redirect", "https://claude.com")];
-    render(SearchView, { api: api({ query: vi.fn().mockResolvedValue(found), icon }) });
+    await show({ api: api({ query: vi.fn().mockResolvedValue(found), icon }) });
     await waitFor(() => expect(rows()).toHaveLength(2));
     expect(icon).not.toHaveBeenCalled();
     expect(rows().every((r) => r.querySelector("svg") && !r.querySelector(".fallback"))).toBe(true);
@@ -207,7 +221,7 @@ describe("logos de páginas web", () => {
     found[0].site = "https://claude.ai";
     found[1].site = "https://www.google.com";
     const icon = vi.fn().mockResolvedValue(null);
-    render(SearchView, { api: api({ query: vi.fn().mockResolvedValue(found), icon }) });
+    await show({ api: api({ query: vi.fn().mockResolvedValue(found), icon }) });
     await waitFor(() => expect(rows()).toHaveLength(3));
     expect(rows()[0].querySelector("img")!.getAttribute("src")).toBe("https://claude.ai/favicon.ico");
     expect(rows()[1].querySelector("img")!.getAttribute("src")).toBe("https://www.google.com/favicon.ico");
@@ -220,7 +234,7 @@ describe("logos de páginas web", () => {
     const found = [item("w1", "Abrir sitio.local", "redirect", "http://sitio.local"), item("w2", "Buscar «x»", "web_search", "Búsqueda web en sitio.local")];
     found[0].site = "http://sitio.local";
     found[1].site = "http://sitio.local";
-    render(SearchView, { api: api({ query: vi.fn().mockResolvedValue(found) }) });
+    await show({ api: api({ query: vi.fn().mockResolvedValue(found) }) });
     await waitFor(() => expect(rows()).toHaveLength(2));
     for (const row of rows()) await fireEvent.error(row.querySelector("img")!);
     expect(rows().every((r) => !r.querySelector("img") && r.querySelector("svg"))).toBe(true);
