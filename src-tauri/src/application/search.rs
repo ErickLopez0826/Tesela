@@ -10,8 +10,19 @@ use crate::domain::search::{
     fold, host_of, is_http_url, norm, origin_of, parse_web_search, rank, Candidate, Redirect, RedirectKind, Ranked, SearchItem, SearchKind, UsageEntry,
     WEB_SEARCH_SCORE,
 };
+use crate::domain::packaged;
+use crate::domain::windows_settings;
 use crate::domain::startup::{exe_of_path, AppSuggestion};
 use crate::domain::utility::{is_launchable, OpenApp};
+
+/// ¿Se puede abrir esto? Un `.exe` o acceso directo con ruta absoluta, o la dirección de una app empaquetada (Teams…).
+fn can_launch(path: &str) -> Result<(), String> {
+    if packaged::is_launch_path(path) {
+        packaged::validate_launch_path(path)
+    } else {
+        is_launchable(path)
+    }
+}
 
 /// Puerto: lo que el buscador necesita del sistema.
 pub trait SearchHost: Send {
@@ -34,6 +45,8 @@ enum Target {
     Launch { path: String },
     Focus { handle: isize, path: String },
     Url { url: String },
+    /// Una página de la Configuración de Windows (`ms-settings:…`).
+    Setting { uri: String },
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +55,9 @@ struct Entry {
     /// Clave del historial de uso.
     key: String,
 }
+
+/// Letras mínimas para que salgan páginas de la Configuración de Windows: con una sola, sus decenas de nombres taparían a las aplicaciones.
+const MIN_SETTINGS_QUERY: usize = 2;
 
 /// Cuántos identificadores se recuerdan: las consultas llegan mientras se escribe y la interfaz descarta las viejas, pero
 /// la respuesta de una consulta anterior puede terminar después; así los identificadores de ambas siguen siendo válidos.
@@ -88,12 +104,31 @@ impl SearchService {
         for app in host.apps() {
             let key = format!("app:{}:{}", app.exe, fold(&app.name));
             let window = app.running.then(|| open.iter().find(|o| exe_of_path(&o.exe) == app.exe)).flatten();
+            // El `.exe` de una app empaquetada vive en `WindowsApps` y Windows no deja ejecutarlo directamente: para reabrirla o sacar
+            // su logo se usa siempre su dirección de la Tienda.
+            let keep_own_path = packaged::is_launch_path(&app.path);
             let (kind, subtitle, target) = match window {
-                Some(w) => (SearchKind::Running, "En ejecución", Target::Focus { handle: w.handle, path: if w.path.is_empty() { app.path.clone() } else { w.path.clone() } }),
+                Some(w) => (
+                    SearchKind::Running,
+                    "En ejecución",
+                    Target::Focus { handle: w.handle, path: if w.path.is_empty() || keep_own_path { app.path.clone() } else { w.path.clone() } },
+                ),
                 None => (SearchKind::App, "Aplicación", Target::Launch { path: app.path.clone() }),
             };
             targets.insert(key.clone(), Entry { target, key: key.clone() });
             candidates.push(Candidate { key, kind, title: app.name.clone(), subtitle: subtitle.into(), match_text: app.name, site: None });
+        }
+
+        // La Configuración de Windows no tiene acceso directo (es una app UWP): sus páginas salen de una lista fija.
+        for page in windows_settings::PAGES {
+            // Con una sola letra se dejan fuera: ahí mandan las aplicaciones.
+            if !text.trim().is_empty() && text.trim().chars().count() < MIN_SETTINGS_QUERY {
+                break;
+            }
+            let Some(match_text) = windows_settings::matching_name(page, text) else { continue };
+            let key = format!("setting:{}", page.uri);
+            targets.insert(key.clone(), Entry { target: Target::Setting { uri: page.uri.into() }, key: key.clone() });
+            candidates.push(Candidate { key, kind: SearchKind::App, title: page.name.into(), subtitle: "Configuración de Windows".into(), match_text: match_text.into(), site: None });
         }
 
         for r in redirects.iter().filter(|r| r.kind == RedirectKind::Redirect) {
@@ -135,6 +170,8 @@ impl SearchService {
     pub fn icon_path(&self, id: &str) -> Option<String> {
         match &self.issued.lock().unwrap().entries.get(id)?.target {
             Target::Launch { path } | Target::Focus { path, .. } if !path.is_empty() => Some(path.clone()),
+            // Todas las páginas de la Configuración llevan el engranaje de la app.
+            Target::Setting { .. } => Some(windows_settings::ICON_ADDRESS.into()),
             _ => None,
         }
     }
@@ -151,16 +188,22 @@ impl SearchService {
                 }
                 host.open_url(&url)?;
             }
+            Target::Setting { uri } => {
+                windows_settings::validate_uri(&uri)?;
+                // La Configuración es una app empaquetada: no se puede elevar, se abre siempre normal.
+                host.launch(&uri, false)?;
+            }
             Target::Launch { path } => {
-                is_launchable(&path)?;
+                can_launch(&path)?;
                 host.launch(&path, as_admin)?;
             }
             Target::Focus { handle, path } => {
-                if as_admin && is_launchable(&path).is_ok() {
+                // Una app empaquetada no se puede elevar desde fuera: con ctrl+Enter solo se enfoca.
+                if as_admin && !packaged::is_launch_path(&path) && is_launchable(&path).is_ok() {
                     host.launch(&path, true)?;
                 } else if host.focus(handle).is_err() {
                     // La ventana ya no existe: se abre otra.
-                    is_launchable(&path)?;
+                    can_launch(&path)?;
                     host.launch(&path, as_admin)?;
                 }
             }
@@ -280,6 +323,72 @@ mod tests {
         h.focus_fails = true;
         svc.open(&mut h, &items[0].id, false).unwrap();
         assert_eq!(h.launched, vec![(r"C:\Programas\spotify.exe".to_string(), false)]);
+    }
+
+    const TEAMS: &str = r"shell:AppsFolder\MSTeams_8wekyb3d8bbwe!MSTeams";
+
+    fn teams(running: bool) -> FakeHost {
+        FakeHost {
+            apps: vec![AppSuggestion { name: "Microsoft Teams".into(), exe: "ms-teams".into(), path: TEAMS.into(), running }],
+            // La ventana de Teams vive en WindowsApps: ese `.exe` no se puede ejecutar directamente.
+            open: if running {
+                vec![OpenApp { handle: 11, exe: "ms-teams.exe".into(), path: r"C:\Program Files\WindowsApps\MSTeams_26260.1701.5139.3736_x64__8wekyb3d8bbwe\ms-teams.exe".into(), title: "Teams".into() }]
+            } else {
+                vec![]
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn una_app_empaquetada_cerrada_se_abre_por_su_direccion_de_la_tienda() {
+        let (svc, mut h) = (SearchService::new(), teams(false));
+        let items = query(&svc, &mut h, "teams", &[]);
+        assert_eq!(titles(&items), ["Microsoft Teams"]);
+        assert!(svc.open(&mut h, &items[0].id, false).unwrap().is_some(), "no debe rechazarse por «ruta absoluta»");
+        assert_eq!(h.launched, vec![(TEAMS.to_string(), false)]);
+        // El logo se pide por esa misma dirección.
+        assert_eq!(svc.icon_path(&items[0].id).as_deref(), Some(TEAMS));
+    }
+
+    #[test]
+    fn una_app_empaquetada_abierta_se_enfoca_y_su_logo_sale_de_la_tienda_no_de_windowsapps() {
+        let (svc, mut h) = (SearchService::new(), teams(true));
+        let items = query(&svc, &mut h, "teams", &[]);
+        assert_eq!(items[0].kind, SearchKind::Running);
+        assert_eq!(svc.icon_path(&items[0].id).as_deref(), Some(TEAMS));
+        svc.open(&mut h, &items[0].id, false).unwrap();
+        assert_eq!(h.focused, vec![11]);
+        assert!(h.launched.is_empty());
+    }
+
+    #[test]
+    fn si_la_ventana_de_una_app_empaquetada_ya_no_existe_se_reabre_por_la_tienda() {
+        let (svc, mut h) = (SearchService::new(), teams(true));
+        let items = query(&svc, &mut h, "teams", &[]);
+        h.focus_fails = true;
+        svc.open(&mut h, &items[0].id, false).unwrap();
+        assert_eq!(h.launched, vec![(TEAMS.to_string(), false)], "nunca el .exe de WindowsApps");
+    }
+
+    #[test]
+    fn ctrl_enter_en_una_app_empaquetada_abierta_solo_la_enfoca_porque_no_se_puede_elevar() {
+        let (svc, mut h) = (SearchService::new(), teams(true));
+        let items = query(&svc, &mut h, "teams", &[]);
+        svc.open(&mut h, &items[0].id, true).unwrap();
+        assert_eq!(h.focused, vec![11]);
+        assert!(h.launched.is_empty());
+    }
+
+    #[test]
+    fn una_direccion_de_la_tienda_mal_formada_se_rechaza_aunque_la_ofrezca_el_host() {
+        for bad in [r"shell:AppsFolder\a!b --x", r"shell:AppsFolder\..\x!y", r"shell:Desktop\cmd.exe"] {
+            let svc = SearchService::new();
+            let mut h = FakeHost { apps: vec![AppSuggestion { name: "Mala".into(), exe: "mala".into(), path: bad.into(), running: false }], ..Default::default() };
+            let items = query(&svc, &mut h, "mala", &[]);
+            assert!(svc.open(&mut h, &items[0].id, false).is_err(), "{bad}");
+            assert!(h.launched.is_empty(), "{bad}");
+        }
     }
 
     #[test]
@@ -402,5 +511,56 @@ mod tests {
             svc.open(&mut h, &items[0].id, false).unwrap().unwrap()
         }).collect();
         assert_eq!(keys, ["app:update:discord", "app:update:slack"]);
+    }
+
+    // --- Configuración de Windows -----------------------------------------------------------------------------------
+
+    #[test]
+    fn la_configuracion_de_windows_se_encuentra_por_su_nombre_y_por_otras_palabras() {
+        let (svc, mut h) = (SearchService::new(), host());
+        for (text, title) in [("configuracion", "Configuración"), ("ajustes", "Configuración"), ("settings", "Configuración"), ("privacidad", "Privacidad y seguridad"), ("barra", "Barra de tareas"), ("aplicaciones", "Aplicaciones instaladas")] {
+            let items = query(&svc, &mut h, text, &[]);
+            let found = by(&items, title);
+            assert_eq!((found.kind, found.subtitle.as_str()), (SearchKind::App, "Configuración de Windows"), "{text}");
+        }
+        // «Configuración» es lo primero que sale al escribir su nombre.
+        assert_eq!(query(&svc, &mut h, "configuracion", &[])[0].title, "Configuración");
+    }
+
+    #[test]
+    fn con_una_sola_letra_mandan_las_apps_y_no_salen_paginas_de_la_configuracion() {
+        let (svc, mut h) = (SearchService::new(), host());
+        assert_eq!(titles(&query(&svc, &mut h, "s", &[])), ["Steam", "Spotify"]);
+        assert!(query(&svc, &mut h, "", &[]).is_empty());
+    }
+
+    #[test]
+    fn una_pagina_de_la_configuracion_abre_su_direccion_sin_elevar_y_lleva_el_icono_de_la_app() {
+        let (svc, mut h) = (SearchService::new(), host());
+        let items = query(&svc, &mut h, "barra de tareas", &[]);
+        let page = by(&items, "Barra de tareas");
+        assert_eq!(svc.icon_path(&page.id).as_deref(), Some(windows_settings::ICON_ADDRESS));
+        assert_eq!(svc.open(&mut h, &page.id, false).unwrap().as_deref(), Some("setting:ms-settings:taskbar"));
+        // Con ctrl+Enter también se abre normal: la Configuración no se puede elevar.
+        svc.open(&mut h, &page.id, true).unwrap();
+        assert_eq!(h.launched, vec![("ms-settings:taskbar".to_string(), false), ("ms-settings:taskbar".to_string(), false)]);
+        assert!(h.focused.is_empty() && h.urls.is_empty());
+    }
+
+    #[test]
+    fn la_portada_de_la_configuracion_abre_ms_settings_a_secas() {
+        let (svc, mut h) = (SearchService::new(), host());
+        let items = query(&svc, &mut h, "configuracion", &[]);
+        svc.open(&mut h, &items[0].id, false).unwrap();
+        assert_eq!(h.launched, vec![("ms-settings:".to_string(), false)]);
+    }
+
+    #[test]
+    fn una_pagina_usada_sale_con_el_cuadro_vacio() {
+        let (svc, h) = (SearchService::new(), &mut host());
+        let mut usage = HashMap::new();
+        record_usage(&mut usage, "setting:ms-settings:privacy", 0);
+        let items = svc.query(h, "", &[], &usage, 0);
+        assert_eq!(titles(&items), ["Privacidad y seguridad"]);
     }
 }

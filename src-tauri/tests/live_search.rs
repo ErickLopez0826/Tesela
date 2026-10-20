@@ -167,6 +167,72 @@ fn las_apps_de_escritorio_empaquetadas_se_encuentran_y_tienen_logo() {
     assert!(with_logo * 10 >= packaged.len() * 8, "al menos el 80 % debe dar logo");
 }
 
+/// Anfitrión que lee las apps reales pero NO abre nada: solo anota lo que el servicio pidió lanzar.
+struct RecordingHost {
+    real: Win32SearchHost,
+    launched: Vec<(String, bool)>,
+}
+
+impl tesela_lib::application::search::SearchHost for RecordingHost {
+    fn apps(&mut self) -> Vec<tesela_lib::domain::startup::AppSuggestion> {
+        self.real.apps()
+    }
+    fn open_apps(&mut self) -> Vec<tesela_lib::domain::utility::OpenApp> {
+        self.real.open_apps()
+    }
+    fn focus(&mut self, _handle: isize) -> Result<(), String> {
+        Err("no se enfoca nada en la prueba".into())
+    }
+    fn launch(&mut self, path: &str, as_admin: bool) -> Result<(), String> {
+        self.launched.push((path.to_string(), as_admin));
+        Ok(())
+    }
+    fn open_url(&mut self, _url: &str) -> Result<(), String> {
+        Err("no se abre ninguna dirección en la prueba".into())
+    }
+}
+
+#[test]
+#[ignore = "lee las apps reales; NO abre ninguna (el anfitrión solo anota el lanzamiento)"]
+fn todas_las_apps_empaquetadas_reales_se_aceptan_al_abrirlas() {
+    use tesela_lib::application::search::SearchHost;
+    let mut host = RecordingHost { real: Win32SearchHost::new(Default::default()), launched: Vec::new() };
+    let packaged: Vec<_> = host.apps().into_iter().filter(|a| a.path.starts_with("shell:AppsFolder") && !a.running).collect();
+    assert!(!packaged.is_empty());
+    let svc = SearchService::new();
+    let mut accepted = 0;
+    for app in &packaged {
+        // Se busca por el nombre exacto y se abre el resultado que corresponde a esta app.
+        let items = svc.query(&mut host, &app.name, &[], &HashMap::new(), 0);
+        let Some(item) = items.iter().find(|i| i.title == app.name) else { continue };
+        host.launched.clear();
+        svc.open(&mut host, &item.id, false).unwrap_or_else(|e| panic!("{} se rechazó: {e}", app.name));
+        assert_eq!(host.launched, vec![(app.path.clone(), false)], "{}", app.name);
+        accepted += 1;
+    }
+    eprintln!("apps empaquetadas aceptadas al abrir: {accepted} de {}", packaged.len());
+    assert!(accepted * 10 >= packaged.len() * 9, "al menos el 90 % ({accepted} de {})", packaged.len());
+}
+
+#[test]
+#[ignore = "lee el logo real de la Configuración de Windows; NO abre nada"]
+fn la_configuracion_de_windows_aparece_con_su_engranaje_y_se_acepta_al_abrirla() {
+    let mut host = RecordingHost { real: Win32SearchHost::new(Default::default()), launched: Vec::new() };
+    let svc = SearchService::new();
+    for (text, title, uri) in [("configuracion", "Configuración", "ms-settings:"), ("privacidad", "Privacidad y seguridad", "ms-settings:privacy"), ("barra de tareas", "Barra de tareas", "ms-settings:taskbar")] {
+        let items = svc.query(&mut host, text, &[], &HashMap::new(), 0);
+        let hit = items.iter().find(|i| i.title == title).unwrap_or_else(|| panic!("«{text}» no encuentra {title}: {items:?}"));
+        assert_eq!(hit.kind, SearchKind::App);
+        assert!(!hit.id.contains([':', '\\']), "el identificador sigue siendo opaco");
+        let path = svc.icon_path(&hit.id).expect("ruta del icono");
+        let png = icons::file_icon_png(&path).unwrap_or_else(|| panic!("sin icono para {title}"));
+        assert_eq!(&png[1..4], b"PNG");
+        host.launched.clear();
+        svc.open(&mut host, &hit.id, true).unwrap();
+        assert_eq!(host.launched, vec![(uri.to_string(), false)]);
+    }
+}
+
 #[test]
 #[ignore = "lee iconos de programas reales"]
 fn el_icono_sale_del_archivo_y_no_es_el_generico_de_la_extension() {

@@ -5,6 +5,7 @@ use tauri::State;
 
 use crate::application::list_windows as use_case;
 use crate::application::ports::SystemStatsProvider;
+use crate::domain::battery::BatteryState;
 use crate::domain::actions::Action;
 use crate::application::system::{list_wallpapers, resolve_wallpaper, SystemServices};
 use crate::application::modules::{ModuleApi, StateSource};
@@ -622,6 +623,12 @@ pub async fn volume_set(state: State<'_, AppState>, percent: f32) -> Result<Acti
 pub async fn volume_mute(state: State<'_, AppState>, muted: bool) -> Result<ActionOutcome, String> {
     let s = state.services.clone();
     blocking(move || s.volume.lock().map_err(lock_err)?.set_muted(muted)).await
+}
+
+/// Batería del equipo; `None` en un equipo de escritorio (la interfaz entonces no muestra nada).
+#[tauri::command]
+pub async fn battery_get() -> Result<Option<BatteryState>, String> {
+    blocking(|| Ok(crate::infrastructure::windows::system::battery::read())).await
 }
 
 #[tauri::command]

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { BatteryState } from "../stores/battery";
 
 export interface ActionOutcome {
   /** `true`: no se tocó nada de verdad (modo seguro). */
@@ -182,6 +183,7 @@ export const systemApi = {
   mediaNow: () => invoke<MediaInfo | null>("media_now"),
   mediaThumbnail: () => invoke<string | null>("media_thumbnail"),
   mediaCommand: (command: MediaCommandName) => invoke<ActionOutcome>("media_command", { command }),
+  batteryGet: () => invoke<BatteryState | null>("battery_get"),
   volumeGet: () => invoke<VolumeState>("volume_get"),
   volumeSet: (percent: number) => invoke<ActionOutcome>("volume_set", { percent }),
   volumeMute: (muted: boolean) => invoke<ActionOutcome>("volume_mute", { muted }),

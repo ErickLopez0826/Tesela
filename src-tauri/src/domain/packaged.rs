@@ -66,6 +66,27 @@ pub fn is_launch_path(path: &str) -> bool {
     path.get(..r"shell:AppsFolder\".len()).is_some_and(|p| p.eq_ignore_ascii_case(r"shell:AppsFolder\"))
 }
 
+/// Máximo razonable de una dirección de lanzamiento (un nombre de familia y un id son cortos).
+const MAX_LAUNCH_PATH_CHARS: usize = 300;
+
+/// ¿Es un trozo válido de una dirección de lanzamiento? Solo letras, números, `.`, `-` y `_` (lo que usan Windows y la Tienda).
+fn is_name_part(part: &str) -> bool {
+    !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+}
+
+/// Valida una dirección `shell:AppsFolder\<familia>!<id>` antes de abrirla. Es más estricta que la de los `.exe`: nada de otras
+/// carpetas del shell, rutas, `..`, espacios, comillas ni parámetros; solo el identificador de una aplicación empaquetada.
+pub fn validate_launch_path(path: &str) -> Result<(), String> {
+    if !is_launch_path(path) || path.len() > MAX_LAUNCH_PATH_CHARS {
+        return Err("no es la dirección de una app empaquetada".into());
+    }
+    let id = &path[r"shell:AppsFolder\".len()..];
+    match id.split_once('!') {
+        Some((family, app)) if is_name_part(family) && is_name_part(app) && !family.starts_with('.') && !app.starts_with('.') => Ok(()),
+        _ => Err("el identificador de la app empaquetada no es válido".into()),
+    }
+}
+
 /// Nombre con el que se muestra una app: el del paquete si es la única, y con el programa añadido si el paquete trae
 /// varias (así «Files» y «Calendar» no se llaman igual).
 pub fn display_name(package_name: &str, executable: &str, siblings: usize) -> String {
@@ -149,6 +170,38 @@ mod tests {
         assert!(is_launch_path(r"SHELL:appsfolder\x!y"));
         assert!(!is_launch_path(r"C:\Programas\app.exe"));
         assert!(!is_launch_path("é"));
+    }
+
+    #[test]
+    fn solo_se_abren_identificadores_de_apps_empaquetadas_bien_formados() {
+        for ok in [
+            r"shell:AppsFolder\MSTeams_8wekyb3d8bbwe!MSTeams",
+            r"shell:AppsFolder\Claude_pzs8sxrjxfjjc!Claude",
+            r"shell:AppsFolder\Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App",
+            r"SHELL:appsfolder\AppUp.IntelArcSoftware_8j3eq9eme6ctt!INTELGRAPHICSSOFTWARE",
+        ] {
+            assert!(validate_launch_path(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "",
+            r"shell:AppsFolder\",
+            r"shell:AppsFolder\sin-id",
+            r"shell:AppsFolder\!id",
+            r"shell:AppsFolder\fam!",
+            r"shell:AppsFolder\a!b!c",
+            r"shell:AppsFolder\..\x!y",
+            r"shell:AppsFolder\a\b!c",
+            r"shell:AppsFolder\a b!c",
+            r#"shell:AppsFolder\a"!c"#,
+            r"shell:AppsFolder\a!c --flag",
+            r"shell:AppsFolder\{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\cmd.exe",
+            r"shell:Desktop\x!y",
+            r"C:\Windows\System32\cmd.exe",
+            "https://example.com",
+        ] {
+            assert!(validate_launch_path(bad).is_err(), "{bad:?} debería rechazarse");
+        }
+        assert!(validate_launch_path(&format!(r"shell:AppsFolder\{}!x", "a".repeat(400))).is_err());
     }
 
     #[test]

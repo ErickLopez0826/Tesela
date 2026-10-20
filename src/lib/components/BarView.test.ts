@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StateSnapshot } from "../api/state";
+import type { BatteryState } from "../stores/battery";
 import BarView from "./BarView.svelte";
 
 afterEach(cleanup);
@@ -50,6 +51,47 @@ describe("BarView", () => {
     render(BarView, { monitorId: 1, state: { ...state, paused: true, mode: "resize" }, stats, now, onWorkspace: vi.fn() });
     expect(screen.getByText("en pausa")).toBeTruthy();
     expect(screen.getByText("modo resize")).toBeTruthy();
+  });
+});
+
+describe("BarView: batería", () => {
+  const withBattery = (battery: BatteryState | null) => render(BarView, { monitorId: 1, state, stats, now, battery, onWorkspace: vi.fn() });
+
+  it("en un equipo sin batería (un escritorio) no muestra nada", () => {
+    const { container } = withBattery(null);
+    expect(container.querySelector(".bat")).toBeNull();
+    expect(container.querySelector(".battery")).toBeNull();
+  });
+
+  it("con batería enseña el porcentaje, el modo y el tiempo restante", () => {
+    const { container } = withBattery({ percent: 57.4, mode: "on_battery", minutes_left: 121, saver: false });
+    const bat = container.querySelector(".bat")!;
+    expect(bat.textContent?.trim()).toBe("57%");
+    expect(bat.getAttribute("title")).toBe("Batería 57% · con batería, 2 h 1 min restantes");
+    expect(container.querySelector(".bolt")).toBeNull();
+    expect(bat.classList.contains("low")).toBe(false);
+    // La carga se dibuja: 57,4 % de un hueco de 14.
+    expect(Number(container.querySelector("[data-fill]")!.getAttribute("width"))).toBeCloseTo(8.04, 1);
+  });
+
+  it("cargando lleva un rayo y no se marca como baja aunque tenga poca carga", () => {
+    const { container } = withBattery({ percent: 8, mode: "charging", minutes_left: null, saver: false });
+    const bat = container.querySelector(".bat")!;
+    expect(container.querySelector(".bolt")).not.toBeNull();
+    expect(bat.classList.contains("charging")).toBe(true);
+    expect(bat.classList.contains("low")).toBe(false);
+    expect(bat.getAttribute("title")).toBe("Batería 8% · cargando");
+  });
+
+  it("con poca batería y sin cargador se marca como baja", () => {
+    const { container } = withBattery({ percent: 15, mode: "on_battery", minutes_left: 20, saver: true });
+    expect(container.querySelector(".bat")!.classList.contains("low")).toBe(true);
+  });
+
+  it("se cuenta como un dato más, con su separador", () => {
+    const { container } = render(BarView, { monitorId: 1, state, stats, now, volume: { percent: 40, muted: false }, battery: { percent: 90, mode: "plugged_in", minutes_left: null, saver: false }, onWorkspace: vi.fn() });
+    // CPU, RAM, volumen, batería y hora: cinco datos, cuatro separadores.
+    expect(container.querySelectorAll(".dots[aria-hidden='true']").length).toBe(4);
   });
 });
 

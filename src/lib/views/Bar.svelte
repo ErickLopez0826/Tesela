@@ -16,6 +16,8 @@
   const modules = createModulesStore();
   const statsStore = createStatsStore();
   const volume = createPollingStore(systemApi.volumeGet, 3000);
+  // Sin batería (un equipo de escritorio) llega `null` y la barra no muestra nada.
+  const battery = createPollingStore(systemApi.batteryGet, 15000);
   // El consumo de la gráfica sale del resumen del sistema.
   const overview = createPollingStore(systemApi.overview, 5000);
   let now = $state(new Date());
@@ -27,6 +29,7 @@
     void modules.start();
     statsStore.start();
     volume.start();
+    battery.start();
     overview.start();
     clock = setInterval(() => (now = new Date()), 1000);
     return stopBorderSync;
@@ -37,6 +40,7 @@
     modules.stop();
     statsStore.stop();
     volume.stop();
+    battery.stop();
     overview.stop();
     clearInterval(clock);
   });
@@ -47,6 +51,7 @@
   state={$stateStore}
   stats={$statsStore}
   volume={$volume}
+  battery={$battery}
   gpu={$overview?.gpu_percent ?? null}
   temperature={$merida?.temperature ?? null}
   weatherCode={$merida?.code ?? null}

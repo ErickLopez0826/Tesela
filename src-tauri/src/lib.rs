@@ -211,6 +211,7 @@ pub fn run() {
             interface::commands::media_now,
             interface::commands::media_command,
             interface::commands::media_thumbnail,
+            interface::commands::battery_get,
             interface::commands::volume_get,
             interface::commands::volume_set,
             interface::commands::volume_mute,

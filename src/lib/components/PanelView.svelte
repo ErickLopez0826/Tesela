@@ -29,6 +29,7 @@
   import SettingsPanel from "./SettingsPanel.svelte";
   import ConnectivitySection from "./sections/ConnectivitySection.svelte";
   import EngineWallpapers from "./sections/EngineWallpapers.svelte";
+  import MonthCalendar from "./sections/MonthCalendar.svelte";
   import NotesSection from "./sections/NotesSection.svelte";
   import MediaSection from "./sections/MediaSection.svelte";
   import StatsSection from "./sections/StatsSection.svelte";
@@ -133,6 +134,8 @@
     { id: "modules", label: "Módulos" },
   ];
   let tabId: TabId = $state("today");
+  // En «Hoy», el botón del calendario cambia los días de la semana por el mes completo.
+  let calendarOpen = $state(false);
 
   // El marcador de la pestaña activa es una sola pieza que se desliza de una pestaña a otra: el borde por el que
   // sale se mueve más rápido que el otro, así se estira al viajar y se recoge al llegar, como una gota.
@@ -248,12 +251,22 @@
               </div>
             </section>
             <section class="section week-card">
-              <h3>Esta semana <span class="range">{weekRange(now)}</span></h3>
-              <div class="days">
-                {#each weekDays(now) as d (d.label)}
-                  <div class="day" class:today={d.today}><small>{d.label}</small><strong>{d.day}</strong></div>
-                {/each}
-              </div>
+              <h3>
+                {calendarOpen ? "Calendario" : "Esta semana"}
+                {#if !calendarOpen}<span class="range">{weekRange(now)}</span>{/if}
+                <button class="cal-toggle" class:open={calendarOpen} aria-label={calendarOpen ? "Cerrar calendario" : "Abrir calendario"} aria-pressed={calendarOpen} onclick={() => (calendarOpen = !calendarOpen)}>
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+                </button>
+              </h3>
+              {#if calendarOpen}
+                <MonthCalendar {now} />
+              {:else}
+                <div class="days">
+                  {#each weekDays(now) as d (d.label)}
+                    <div class="day" class:today={d.today}><small>{d.label}</small><strong>{d.day}</strong></div>
+                  {/each}
+                </div>
+              {/if}
               <div class="date long">{date}</div>
             </section>
             {#if tasks}
@@ -359,6 +372,10 @@
   .date.long { margin-top: 10px; }
   .range { margin-left: auto; font-weight: 400; letter-spacing: 0.06em; text-transform: none; }
   .week-card h3 { display: flex; }
+  .range + .cal-toggle { margin-left: 8px; }
+  .cal-toggle { margin-left: auto; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 999px; cursor: pointer; transition: color 0.3s, border-color 0.3s, background 0.3s; }
+  .cal-toggle:hover { color: var(--fg); border-color: var(--line); }
+  .cal-toggle.open { color: var(--on-accent); background: var(--accent); }
   .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; text-align: center; }
   .day { padding: 8px 0; border-radius: 14px; display: flex; flex-direction: column; gap: 4px; transition: background 0.3s; }
   .day small { opacity: 0.6; font: 10px var(--mono); text-transform: uppercase; }

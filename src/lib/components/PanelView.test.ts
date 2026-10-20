@@ -41,6 +41,29 @@ describe("PanelView", () => {
     expect(screen.getByText("Esta semana", { exact: false })).toBeTruthy();
   });
 
+  it("«Hoy» abre un calendario del mes con hoy marcado, navega entre meses y se cierra", async () => {
+    const { container } = render(PanelView, { ...base });
+    expect(screen.queryByRole("grid")).toBeNull();
+    await fireEvent.click(screen.getByRole("button", { name: "Abrir calendario" }));
+    expect(screen.getByText("Calendario")).toBeTruthy();
+    expect(screen.getByRole("grid", { name: "Junio de 2026" })).toBeTruthy();
+    expect(container.querySelector(".day")).toBeNull();
+    expect(container.querySelector(".cell.today")?.textContent).toBe("1");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Mes siguiente" }));
+    expect(screen.getByRole("grid", { name: "Julio de 2026" })).toBeTruthy();
+    expect(container.querySelector(".cell.today")).toBeNull();
+    await fireEvent.click(screen.getByRole("button", { name: "Mes anterior" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Mes anterior" }));
+    expect(screen.getByRole("grid", { name: "Mayo de 2026" })).toBeTruthy();
+    await fireEvent.click(screen.getByRole("button", { name: "Volver al mes de hoy" }));
+    expect(screen.getByRole("grid", { name: "Junio de 2026" })).toBeTruthy();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Cerrar calendario" }));
+    expect(screen.queryByRole("grid")).toBeNull();
+    expect(container.querySelectorAll(".day")).toHaveLength(7);
+  });
+
   it("«Hoy» muestra el clima de Mérida y avisa si no está disponible", () => {
     const { unmount } = render(PanelView, { ...base, weather: { temperature: 31.4, feelsLike: 36, humidity: 62, wind: 11, code: 2, max: 34, min: 25 } });
     expect(screen.getByText("31°")).toBeTruthy();

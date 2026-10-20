@@ -8,6 +8,8 @@
   import ModuleFrame from "./ModuleFrame.svelte";
   import GlassBackdrop from "./GlassBackdrop.svelte";
   import WeatherIcon from "./WeatherIcon.svelte";
+  import BatteryIcon from "./BatteryIcon.svelte";
+  import { describeBattery, isLow, type BatteryState } from "../stores/battery";
   import { describeWeather } from "../stores/weather";
   import { theme } from "../stores/theme";
   import { formatClock, formatPercent, ramPercent, workspacesFor } from "../stores/wmState";
@@ -18,6 +20,7 @@
     stats,
     now,
     volume = null,
+    battery = null,
     gpu = null,
     temperature = null,
     weatherCode = null,
@@ -30,6 +33,8 @@
     stats: SystemStats | null;
     now: Date;
     volume?: VolumeState | null;
+    /** Batería del equipo; sin ella (un equipo de escritorio) no se muestra nada. */
+    battery?: BatteryState | null;
     gpu?: number | null;
     temperature?: number | null;
     /** Código WMO del tiempo actual: la barra lo muestra como icono junto a la temperatura. */
@@ -51,6 +56,7 @@
     ...(gpu !== null ? ["gpu"] : []),
     ...(temperature !== null ? ["temp"] : []),
     ...(volume ? ["vol"] : []),
+    ...(battery ? ["bat"] : []),
     "clock",
   ]);
 </script>
@@ -91,6 +97,10 @@
         <button class="stat vol" aria-label={volume.muted ? "Activar sonido" : "Silenciar"} onclick={() => onMute(!volume.muted)}>
           <Icon name={volume.muted ? "volume-off" : "volume"} size={14} /> {Math.round(volume.percent)}%
         </button>
+      {:else if key === "bat" && battery}
+        <span class="stat bat" class:low={isLow(battery)} class:charging={battery.mode === "charging"} role="img" title={describeBattery(battery)} aria-label={describeBattery(battery)}>
+          <BatteryIcon percent={battery.percent} charging={battery.mode === "charging"} size={18} /> {Math.round(battery.percent)}%
+        </span>
       {:else if key === "clock"}
         <span class="clock">{formatClock(now)}</span>
       {/if}
@@ -134,6 +144,9 @@
   .badge.warn { background: #f2f2f2; color: #0a0a0b; }
   .stat { opacity: 0.8; font-variant-numeric: tabular-nums; }
   .vol { padding: 2px 4px; }
+  .bat { display: inline-flex; align-items: center; gap: 4px; }
+  .bat.low { color: #ff6b5e; opacity: 1; }
+  .bat.charging { opacity: 1; }
   .clock { font-weight: 600; font-variant-numeric: tabular-nums; }
   .vol:hover { background: rgba(255, 255, 255, 0.14); }
 </style>
