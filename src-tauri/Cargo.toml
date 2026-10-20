@@ -57,6 +57,8 @@ windows = { version = "0.62", features = [
   "Security_Credentials",
   "Networking_NetworkOperators",
   "Networking_Connectivity",
+  "ApplicationModel",
+  "Management_Deployment",
   "Foundation",
   "Foundation_Collections",
   "Storage_Streams",

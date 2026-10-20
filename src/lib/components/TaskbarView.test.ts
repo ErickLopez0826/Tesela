@@ -114,6 +114,62 @@ describe("TaskbarView", () => {
   });
 });
 
+describe("TaskbarView: fondo de puntos", () => {
+  const rect = { left: 0, top: 0, width: 300, height: 48, right: 300, bottom: 48, x: 0, y: 0, toJSON() {} } as DOMRect;
+  const realAnimate = Element.prototype.animate;
+  beforeEach(() => {
+    Element.prototype.animate = function () {
+      return { onfinish: null, oncancel: null, cancel() {} } as unknown as Animation;
+    };
+  });
+  afterEach(() => {
+    Element.prototype.animate = realAnimate;
+  });
+
+  const mount = () => render(TaskbarView, { state: snapshot([win(1, 1, "code")]), monitorId: 0, api: api(), onWorkspace: () => {} });
+
+  it("la isla lleva detrás el campo de puntos, entre el cristal y el contenido", () => {
+    mount();
+    const island = document.querySelector(".island")!;
+    const field = island.querySelector(":scope > .field");
+    expect(field).not.toBeNull();
+    expect(field!.classList.contains("contained")).toBe(true);
+    const order = [...island.children].map((c) => c.className.split(" ")[0]);
+    expect(order.indexOf("tint")).toBeLessThan(order.indexOf("field"));
+    expect(order.indexOf("field")).toBeLessThan(order.indexOf("content"));
+  });
+
+  it("los puntos se iluminan bajo el cursor", () => {
+    mount();
+    const field = document.querySelector(".field") as HTMLElement;
+    field.getBoundingClientRect = () => rect;
+    window.dispatchEvent(new PointerEvent("pointermove", { clientX: 120, clientY: 20 }));
+    expect(field.style.getPropertyValue("--mx")).toBe("120px");
+    expect(field.style.getPropertyValue("--lit")).toBe("1");
+  });
+
+  it("al pulsar un botón sale una ola de luz desde él, y fuera de los botones no", async () => {
+    mount();
+    const field = document.querySelector(".field") as HTMLElement;
+    field.getBoundingClientRect = () => rect;
+    await fireEvent.pointerDown(screen.getByRole("button", { name: "code 1" }), { clientX: 60, clientY: 24 });
+    const ripple = field.querySelector(".ripple") as HTMLElement;
+    expect(ripple).not.toBeNull();
+    expect(ripple.style.getPropertyValue("--wx")).toBe("60px");
+    expect(ripple.style.getPropertyValue("--wy")).toBe("24px");
+    ripple.remove();
+    await fireEvent.pointerDown(document.querySelector(".row")!, { clientX: 10, clientY: 10 });
+    expect(field.querySelector(".ripple")).toBeNull();
+  });
+
+  it("el campo no tapa los botones: no recibe el ratón", () => {
+    mount();
+    // La regla vive en el CSS del componente: aquí se comprueba que el campo está marcado como decorativo.
+    expect(document.querySelector(".field")!.getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getByRole("button", { name: "code 1" })).toBeTruthy();
+  });
+});
+
 describe("TaskbarView: segundo plano y energía", () => {
   // jsdom no tiene `Element.animate`, que usan las transiciones de Svelte al aparecer iconos nuevos.
   beforeEach(() => {

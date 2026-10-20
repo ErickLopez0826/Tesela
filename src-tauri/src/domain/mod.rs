@@ -8,6 +8,7 @@ pub mod geometry;
 pub mod layout;
 pub mod manageable;
 pub mod modules;
+pub mod packaged;
 pub mod rules;
 pub mod search;
 pub mod shell;

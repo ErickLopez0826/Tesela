@@ -133,6 +133,41 @@ fn los_iconos_de_los_accesos_directos_salen_sin_la_flechita() {
 }
 
 #[test]
+#[ignore = "lee los paquetes reales de la Tienda; no abre nada"]
+fn las_apps_de_escritorio_empaquetadas_se_encuentran_y_tienen_logo() {
+    use tesela_lib::application::search::SearchHost;
+    let packaged: Vec<_> = Win32SearchHost::new(Default::default()).apps().into_iter().filter(|a| a.path.starts_with("shell:AppsFolder")).collect();
+    assert!(!packaged.is_empty(), "debe haber alguna app empaquetada de escritorio");
+
+    let svc = SearchService::new();
+    let mut host = Win32SearchHost::new(Default::default());
+    let Some(teams) = packaged.iter().find(|a| a.name.to_lowercase().contains("teams")) else {
+        eprintln!("Teams no está instalado en este equipo: se omite la búsqueda");
+        return;
+    };
+    let found = svc.query(&mut host, "teams", &[], &HashMap::new(), 0);
+    let hit = found.iter().find(|i| i.title == teams.name).unwrap_or_else(|| panic!("«teams» no encuentra {}: {found:?}", teams.name));
+    assert!(!hit.id.contains(['\\', '/', ':', '!']), "el identificador sigue siendo opaco");
+
+    // El logo sale del shell, no es una letra ni el icono genérico.
+    let path = svc.icon_path(&hit.id).expect("ruta guardada por el núcleo");
+    let png = icons::file_icon_png(&path).expect("logo de Teams");
+    assert_eq!(&png[1..4], b"PNG");
+    assert!(icons::file_icon_url(&path).unwrap().starts_with("data:image/png;base64,"));
+    if let Ok(dir) = std::env::var("WM_ICON_OUT") {
+        let _ = std::fs::create_dir_all(&dir);
+        for (n, app) in packaged.iter().take(12).enumerate() {
+            if let Some(p) = icons::file_icon_png(&app.path) {
+                let _ = std::fs::write(format!("{dir}/pkg-{n:02}-{}.png", app.exe.replace(['\\', '/', ':'], "_")), p);
+            }
+        }
+    }
+    let with_logo = packaged.iter().filter(|a| icons::file_icon_png(&a.path).is_some()).count();
+    eprintln!("apps empaquetadas: {}, con logo: {with_logo}", packaged.len());
+    assert!(with_logo * 10 >= packaged.len() * 8, "al menos el 80 % debe dar logo");
+}
+
+#[test]
 #[ignore = "lee iconos de programas reales"]
 fn el_icono_sale_del_archivo_y_no_es_el_generico_de_la_extension() {
     let (notepad, explorer) = (r"C:\Windows\System32\notepad.exe", r"C:\Windows\explorer.exe");

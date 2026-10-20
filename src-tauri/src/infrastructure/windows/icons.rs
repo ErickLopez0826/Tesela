@@ -283,9 +283,52 @@ fn shortcut_icon_png(lnk: &str) -> Option<Vec<u8>> {
     (!s.target.is_empty()).then(|| shell_icon_png(&s.target)).flatten()
 }
 
-/// PNG del icono de un archivo que existe: un `.exe` o un acceso directo del menú Inicio (sin la flechita del acceso directo).
-/// A diferencia de `exe_icon_png`, no se queda con el icono genérico de la extensión.
+/// Logo de una app empaquetada (`shell:AppsFolder\…`): se le pide al shell, que es quien sabe cuál es el de su paquete
+/// (el menú Inicio hace lo mismo).
+fn packaged_icon_png(path: &str) -> Option<Vec<u8>> {
+    use windows::core::HSTRING;
+    use windows::Win32::Foundation::SIZE;
+    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::{IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY};
+    unsafe {
+        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let result = (|| {
+            let factory: IShellItemImageFactory = SHCreateItemFromParsingName(&HSTRING::from(path), None).ok()?;
+            let bitmap = factory.GetImage(SIZE { cx: 64, cy: 64 }, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK).ok()?;
+            let png = (|| {
+                let mut bmp = BITMAP::default();
+                if GetObjectW(HGDIOBJ(bitmap.0), size_of::<BITMAP>() as i32, Some(&mut bmp as *mut _ as *mut _)) == 0 {
+                    return None;
+                }
+                let (w, h) = (bmp.bmWidth, bmp.bmHeight);
+                if w <= 0 || h <= 0 || w > 512 || h > 512 {
+                    return None;
+                }
+                let screen = GetDC(None);
+                let hdc = CreateCompatibleDC(Some(screen));
+                let px = dib(hdc, bitmap, w, h);
+                let _ = DeleteDC(hdc);
+                ReleaseDC(None, screen);
+                let px = px?;
+                // Un logo sin ningún píxel visible es un fallo, no un icono.
+                (!px.chunks_exact(4).all(|p| p[3] == 0)).then(|| png(w as u32, h as u32, &px))
+            })();
+            let _ = DeleteObject(HGDIOBJ(bitmap.0));
+            png
+        })();
+        if init.is_ok() {
+            CoUninitialize();
+        }
+        result
+    }
+}
+
+/// PNG del icono de un archivo que existe: un `.exe` o un acceso directo del menú Inicio (sin la flechita del acceso directo),
+/// o el logo de una app empaquetada. A diferencia de `exe_icon_png`, no se queda con el icono genérico de la extensión.
 pub fn file_icon_png(path: &str) -> Option<Vec<u8>> {
+    if crate::domain::packaged::is_launch_path(path) {
+        return packaged_icon_png(path);
+    }
     if path.to_lowercase().ends_with(".lnk") {
         return shortcut_icon_png(path);
     }

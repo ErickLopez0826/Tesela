@@ -11,6 +11,7 @@ use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitiali
 use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
 use crate::application::system::AppsControl;
+use crate::domain::packaged;
 use crate::domain::startup::{exe_of_path, merge_suggestions, AppSuggestion};
 use crate::infrastructure::windows::system::apps::Win32Apps;
 
@@ -87,6 +88,41 @@ fn scan_installed() -> Vec<AppSuggestion> {
     apps
 }
 
+/// Las apps de escritorio empaquetadas (MSIX) del usuario: Teams, Claude, WhatsApp… No tienen acceso directo; se leen de
+/// los manifiestos de los paquetes. Se abren con `shell:AppsFolder\<familia>!<id>`.
+fn scan_packaged() -> Vec<AppSuggestion> {
+    use windows::Management::Deployment::PackageManager;
+    let init = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let mut apps = Vec::new();
+    let list = PackageManager::new().and_then(|m| m.FindPackagesByUserSecurityId(&HSTRING::new()));
+    for package in list.into_iter().flatten() {
+        if package.IsFramework().unwrap_or(false) || package.IsResourcePackage().unwrap_or(false) {
+            continue;
+        }
+        let (Ok(location), Ok(id)) = (package.InstalledPath(), package.Id()) else { continue };
+        let Ok(family) = id.FamilyName() else { continue };
+        let Ok(manifest) = std::fs::read_to_string(Path::new(&location.to_string()).join("AppxManifest.xml")) else { continue };
+        let found = packaged::parse_manifest(&manifest);
+        if found.is_empty() {
+            continue;
+        }
+        let name = package.DisplayName().map(|n| n.to_string()).ok().filter(|n| !n.trim().is_empty()).or_else(|| id.Name().ok().map(|n| n.to_string()));
+        let Some(name) = name else { continue };
+        for app in &found {
+            let exe = exe_of_path(&app.executable);
+            if exe.is_empty() {
+                continue;
+            }
+            let path = packaged::launch_path(&family.to_string(), &app.id);
+            apps.push(AppSuggestion { name: packaged::display_name(&name, &app.executable, found.len()), exe, path, running: false });
+        }
+    }
+    if init.is_ok() {
+        unsafe { CoUninitialize() };
+    }
+    apps
+}
+
 fn running_apps() -> Vec<AppSuggestion> {
     let mut seen = std::collections::HashSet::new();
     Win32Apps::new(Default::default())
@@ -116,6 +152,41 @@ pub fn suggestions() -> Vec<AppSuggestion> {
     merge_suggestions(installed, running_apps())
 }
 
+/// Las apps empaquetadas cambian aún menos que el menú Inicio y leerlas cuesta más: se guardan más tiempo.
+const PACKAGED_CACHE_FOR: Duration = Duration::from_secs(600);
+static PACKAGED: Mutex<Option<(Instant, Vec<AppSuggestion>)>> = Mutex::new(None);
+
+fn packaged_apps() -> Vec<AppSuggestion> {
+    let mut cache = PACKAGED.lock().unwrap();
+    match cache.as_ref() {
+        Some((at, list)) if at.elapsed() < PACKAGED_CACHE_FOR => list.clone(),
+        _ => {
+            let list = scan_packaged();
+            *cache = Some((Instant::now(), list.clone()));
+            list
+        }
+    }
+}
+
+/// Lo que ofrece el buscador: las del menú Inicio, las apps de escritorio empaquetadas (Teams…) y las abiertas. Si un
+/// programa ya tiene acceso directo, no se repite por su paquete.
+pub fn launcher_suggestions() -> Vec<AppSuggestion> {
+    let mut installed = {
+        let mut cache = CACHE.lock().unwrap();
+        match cache.as_ref() {
+            Some((at, list)) if at.elapsed() < CACHE_FOR => list.clone(),
+            _ => {
+                let list = scan_installed();
+                *cache = Some((Instant::now(), list.clone()));
+                list
+            }
+        }
+    };
+    let known: std::collections::HashSet<String> = installed.iter().map(|a| a.exe.clone()).collect();
+    installed.extend(packaged_apps().into_iter().filter(|a| !known.contains(&a.exe)));
+    merge_suggestions(installed, running_apps())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,6 +199,20 @@ mod tests {
         assert!(!is_program_name("Desinstalar Foo"));
         assert!(!is_program_name("Léeme"));
         assert!(!is_program_name("Foo Help"));
+    }
+
+    /// Solo lectura: lee los paquetes reales. En este equipo hay apps de escritorio empaquetadas (Teams, Terminal…).
+    #[test]
+    fn lee_las_apps_empaquetadas_reales() {
+        let started = Instant::now();
+        let apps = scan_packaged();
+        println!("empaquetadas: {} en {:?}", apps.len(), started.elapsed());
+        for a in &apps {
+            println!("  {} | {} | {}", a.name, a.exe, a.path);
+        }
+        assert!(apps.iter().all(|a| !a.name.is_empty() && !a.exe.is_empty() && packaged::is_launch_path(&a.path)));
+        let launcher = launcher_suggestions();
+        assert!(launcher.windows(2).all(|w| w[0].name.to_lowercase() <= w[1].name.to_lowercase()), "ordenadas por nombre");
     }
 
     /// Solo lectura: recorre el menú Inicio real y las ventanas abiertas.

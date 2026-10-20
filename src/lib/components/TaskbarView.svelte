@@ -1,5 +1,6 @@
 <!-- Barra de tareas de Tesela: una isla centrada abajo con las ventanas de cada workspace (1, 2, 3…), cada una con su
-     icono. Su ancho sigue a su contenido y cambia con una transición suave; la ventana se ajusta al mismo ancho. -->
+     icono. Su ancho sigue a su contenido y cambia con una transición suave; la ventana se ajusta al mismo ancho. Detrás
+     lleva el mismo fondo de puntos que el panel: se ilumina bajo el cursor y una ola de luz sale de cada botón que se pulsa. -->
 <script lang="ts">
   import { onMount } from "svelte";
   import { scale } from "svelte/transition";
@@ -9,6 +10,7 @@
   import { backgroundLabel, groupsFor, loadExeIcon, loadIcon, windowLabel } from "../stores/taskbar";
   import { formatBytes } from "../stores/format";
   import { theme } from "../stores/theme";
+  import DotField from "./DotField.svelte";
   import GlassBackdrop from "./GlassBackdrop.svelte";
   import Icon from "./Icon.svelte";
   import PowerMenu from "./PowerMenu.svelte";
@@ -150,6 +152,7 @@
   <div class="island" class:settled style:width={width === null ? undefined : `${width}px`} style:height={height === null ? undefined : `${height}px`}>
     <GlassBackdrop kind="bar" blur={$theme.barBlur} tick={glassTick} anchored={{ gap: BOTTOM_MARGIN }} />
     <div class="tint" aria-hidden="true"></div>
+    <DotField fixed={false} />
     <div class="content" bind:this={content}>
       {#if bgOpen && !powerOpen}
         <section class="bgpanel" aria-label="Aplicaciones en segundo plano">

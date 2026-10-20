@@ -21,7 +21,7 @@ impl Win32SearchHost {
 
 impl SearchHost for Win32SearchHost {
     fn apps(&mut self) -> Vec<AppSuggestion> {
-        installed_apps::suggestions()
+        installed_apps::launcher_suggestions()
     }
 
     fn open_apps(&mut self) -> Vec<OpenApp> {
@@ -33,7 +33,8 @@ impl SearchHost for Win32SearchHost {
     }
 
     fn launch(&mut self, path: &str, as_admin: bool) -> Result<(), String> {
-        if as_admin {
+        // Una app empaquetada no se puede elevar desde fuera (Windows no lo permite con `runas`): se abre normal.
+        if as_admin && !crate::domain::packaged::is_launch_path(path) {
             launch_elevated(path)
         } else {
             self.apps.launch(path)
