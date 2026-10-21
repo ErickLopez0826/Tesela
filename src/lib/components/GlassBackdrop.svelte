@@ -13,7 +13,7 @@
     onLuma,
     anchored = null,
   }: {
-    kind: "bar" | "panel" | "search";
+    kind: "bar" | "panel" | "search" | "popup";
     blur: number;
     tick?: number;
     onLuma?: (luma: number | null) => void;

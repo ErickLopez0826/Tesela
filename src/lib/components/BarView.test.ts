@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StateSnapshot } from "../api/state";
 import type { BatteryState } from "../stores/battery";
+import type { ClaudeActivity, UsageView } from "../api/claude";
 import BarView from "./BarView.svelte";
 
 afterEach(cleanup);
@@ -95,10 +96,101 @@ describe("BarView: batería", () => {
   });
 });
 
+describe("BarView: Claude Code", () => {
+  it("no dibuja un indicador de estado aparte junto a la hora: la animación está en el anillo del uso", () => {
+    for (const activity of ["working", "waiting", "idle"] as const) {
+      const { container } = render(BarView, { monitorId: 1, state, stats, now, claude: { activity, sessions: 1 }, onWorkspace: vi.fn() });
+      expect(container.querySelector(".claude, .claude-status")).toBeNull();
+      cleanup();
+    }
+  });
+});
+
+const NOW_S = Math.floor(Date.now() / 1000);
+const usage = (over: Partial<UsageView> = {}): UsageView => ({
+  enabled: true,
+  status: "ok",
+  windows: [
+    { id: "five_hour", label: "5 h", percent: 73.4, resets_at: NOW_S + 3060, level: "warn" },
+    { id: "seven_day", label: "Semana", percent: 7, resets_at: NOW_S + 3 * 86400, level: "ok" },
+  ],
+  breakdown: [],
+  fetched_at: NOW_S - 60,
+  problem: null,
+  message: null,
+  ...over,
+});
+
+describe("BarView: uso de Claude", () => {
+  const show = (claudeUsage: UsageView | null, extra = {}) => render(BarView, { monitorId: 1, state, stats, now, claudeUsage, onWorkspace: vi.fn(), ...extra });
+
+  it("sin la función activada, sin lectura o sin ventanas no se ve nada", () => {
+    expect(show(null).container.querySelector(".claude-usage")).toBeNull();
+    cleanup();
+    expect(show(usage({ enabled: false, status: "off", windows: [] })).container.querySelector(".claude-usage")).toBeNull();
+    cleanup();
+    expect(show(usage({ status: "waiting", windows: [] })).container.querySelector(".claude-usage")).toBeNull();
+  });
+
+  it("enseña el anillo de puntos con la marca de Claude y el porcentaje de la sesión de 5 horas", () => {
+    const { container } = show(usage());
+    const chip = container.querySelector(".claude-usage")!;
+    expect(chip.textContent?.trim()).toBe("73%");
+    expect(chip.classList.contains("warn")).toBe(true);
+    expect(chip.querySelector(".usage-ring .claude-mark")).not.toBeNull();
+    // 16 puntos, 73 % → 12 encendidos.
+    expect(chip.querySelectorAll(".usage-ring .dot").length).toBe(16);
+    expect(chip.querySelectorAll(".usage-ring .dot.on").length).toBe(12);
+    expect(chip.getAttribute("aria-label")).toContain("Uso de tu suscripción de Claude");
+    expect(chip.getAttribute("aria-label")).toContain("5 h: 73%");
+  });
+
+  it("ocupa el sitio de la temperatura: entre la gráfica y el volumen", () => {
+    const { container } = show(usage(), { gpu: 12, volume: { percent: 40, muted: false } });
+    const order = [...container.querySelectorAll(".zone.right > *:not(.dots)")].map((e) => (e.classList.contains("claude-usage") ? "uso" : e.textContent?.trim().split(" ")[0]));
+    expect(order.indexOf("GPU")).toBeLessThan(order.indexOf("uso"));
+    expect(order.indexOf("uso")).toBeLessThan(order.findIndex((o) => o === "40%"));
+  });
+
+  it("con una lectura vieja se ve atenuado", () => {
+    const { container } = show(usage({ status: "stale", problem: "offline", message: "Sin conexión con Claude." }));
+    expect(container.querySelector(".claude-usage")!.classList.contains("stale")).toBe(true);
+    expect(container.querySelector(".usage-ring")!.classList.contains("dim")).toBe(true);
+  });
+
+  it("una sesión ya reiniciada no se enseña como actual: «—» y el anillo apagado", () => {
+    const old = usage({ windows: [{ id: "five_hour", label: "5 h", percent: 95, resets_at: NOW_S - 10, level: "danger" }] });
+    const { container } = show(old);
+    expect(container.querySelector(".claude-usage")!.textContent?.trim()).toBe("—");
+    expect(container.querySelectorAll(".usage-ring .dot.on").length).toBe(0);
+  });
+
+  it("el anillo se anima solo mientras Claude Code está trabajando", () => {
+    const ring = (claude: ClaudeActivity | null) => render(BarView, { monitorId: 1, state, stats, now, claudeUsage: usage(), claude, onWorkspace: vi.fn() }).container.querySelector(".usage-ring")!;
+    expect(ring({ activity: "working", sessions: 1 }).classList.contains("working")).toBe(true);
+    cleanup();
+    expect(ring({ activity: "waiting", sessions: 1 }).classList.contains("working")).toBe(false);
+    cleanup();
+    expect(ring(null).classList.contains("working")).toBe(false);
+  });
+
+  it("al pasar el cursor avisa con el rectángulo del anillo y al salir avisa de que se fue", async () => {
+    const onUsageHover = vi.fn();
+    const onUsageLeave = vi.fn();
+    const { container } = show(usage(), { onUsageHover, onUsageLeave });
+    const chip = container.querySelector(".claude-usage") as HTMLElement;
+    chip.getBoundingClientRect = () => ({ left: 400, top: 4, width: 50, height: 24, right: 450, bottom: 28, x: 400, y: 4, toJSON() {} }) as DOMRect;
+    await fireEvent.mouseEnter(chip);
+    expect(onUsageHover).toHaveBeenCalledWith({ x: 400, y: 4, w: 50, h: 24 });
+    await fireEvent.mouseLeave(chip);
+    expect(onUsageLeave).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("BarView: separadores, pastilla y workspaces nuevos", () => {
   it("separa los datos con tres puntos, sin separadores huérfanos", () => {
-    const full = render(BarView, { monitorId: 1, state, stats, now, volume: { percent: 40, muted: false }, gpu: 10, temperature: 30, onWorkspace: vi.fn() });
-    // CPU, RAM, GPU, temperatura, volumen y hora: seis datos, cinco separadores.
+    const full = render(BarView, { monitorId: 1, state, stats, now, volume: { percent: 40, muted: false }, gpu: 10, claudeUsage: usage(), onWorkspace: vi.fn() });
+    // CPU, RAM, GPU, uso de Claude, volumen y hora: seis datos, cinco separadores.
     expect(full.container.querySelectorAll(".dots[aria-hidden='true']").length).toBe(5);
     cleanup();
     const bare = render(BarView, { monitorId: 1, state: null, stats: null, now, onWorkspace: vi.fn() });
@@ -128,46 +220,16 @@ describe("BarView: separadores, pastilla y workspaces nuevos", () => {
   });
 });
 
-describe("BarView: volumen, gráfica y temperatura de Mérida", () => {
-  it("muestra el volumen, la gráfica y la temperatura, sin la canción, y silencia con un clic", async () => {
+describe("BarView: volumen y gráfica", () => {
+  it("muestra el volumen y la gráfica, sin la canción ni la temperatura, y silencia con un clic", async () => {
     const onMute = vi.fn();
-    render(BarView, {
-      monitorId: 1,
-      state,
-      stats,
-      now,
-      volume: { percent: 40, muted: false },
-      gpu: 37,
-      temperature: 61.4,
-      onWorkspace: vi.fn(),
-      onMute,
-    });
+    render(BarView, { monitorId: 1, state, stats, now, volume: { percent: 40, muted: false }, gpu: 37, onWorkspace: vi.fn(), onMute });
     expect(screen.queryByText("Banda – Tema")).toBeNull();
     expect(screen.getByText(/^GPU 37/)).toBeTruthy();
-    // Sin el nombre del sitio: solo la temperatura (el tiempo va como icono cuando se conoce).
-    expect(screen.getByText("61 °C")).toBeTruthy();
-    expect(screen.queryByText(/Mérida/)).toBeNull();
+    // La temperatura de Mérida ya no va en la barra (sigue en el panel «Hoy»): su sitio es del uso de Claude.
+    expect(screen.queryByText(/°C/)).toBeNull();
+    expect(document.querySelector(".weather")).toBeNull();
     await fireEvent.click(screen.getByLabelText("Silenciar"));
     expect(onMute).toHaveBeenCalledWith(true);
-  });
-
-  it("muestra el estado del tiempo como icono (sol, nube, lluvia…) junto a la temperatura", () => {
-    const base = { monitorId: 1, state, stats, now, onWorkspace: vi.fn(), temperature: 28.2 };
-    const { container, rerender } = render(BarView, { ...base, weatherCode: 0 });
-    const weather = () => container.querySelector(".weather") as HTMLElement;
-    expect(weather().getAttribute("aria-label")).toBe("Despejado, 28 °C");
-    expect(weather().querySelector("svg")?.getAttribute("data-kind")).toBe("sun");
-    return rerender({ weatherCode: 3 }).then(async () => {
-      expect(weather().querySelector("svg")?.getAttribute("data-kind")).toBe("cloud");
-      expect(weather().getAttribute("title")).toBe("Nublado");
-      await rerender({ weatherCode: 63 });
-      expect(weather().querySelector("svg")?.getAttribute("data-kind")).toBe("rain");
-    });
-  });
-
-  it("sin el código del tiempo muestra solo la temperatura, sin icono", () => {
-    const { container } = render(BarView, { monitorId: 1, state, stats, now, onWorkspace: vi.fn(), temperature: 20 });
-    expect(container.querySelector(".weather svg")).toBeNull();
-    expect(screen.getByText("20 °C")).toBeTruthy();
   });
 });

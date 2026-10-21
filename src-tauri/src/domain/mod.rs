@@ -2,6 +2,9 @@
 
 pub mod actions;
 pub mod battery;
+pub mod claude_activity;
+pub mod claude_settings;
+pub mod claude_usage;
 pub mod config;
 pub mod desktop;
 pub mod effects;

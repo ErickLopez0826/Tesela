@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { tick } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Task, TasksApi } from "../api/tasks";
@@ -111,6 +111,19 @@ describe("PanelView", () => {
       // Con la pestaña activa, además del botón aparece el título de la sección.
       expect(screen.getAllByText(content).length).toBeGreaterThan(0);
     }
+  });
+
+  it("«Fondos» sin Wallpaper Engine pide su carpeta; con él, enseña su biblioteca", async () => {
+    const onEnginePath = vi.fn().mockResolvedValue(undefined);
+    const { unmount } = render(PanelView, { ...base, engine: { available: false, items: [], current: [] }, onEnginePath });
+    await fireEvent.click(screen.getByRole("button", { name: "Fondos" }));
+    await fireEvent.input(screen.getByRole("textbox", { name: "Carpeta de Wallpaper Engine" }), { target: { value: "D:\WE" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Usar esta carpeta" }));
+    await waitFor(() => expect(onEnginePath).toHaveBeenCalledWith("D:\WE"));
+    unmount();
+    render(PanelView, { ...base, engine: { available: true, items: [], current: [] }, onEnginePath });
+    await fireEvent.click(screen.getByRole("button", { name: "Fondos" }));
+    expect(screen.queryByRole("textbox", { name: "Carpeta de Wallpaper Engine" })).toBeNull();
   });
 
   it("se cierra con Escape", async () => {

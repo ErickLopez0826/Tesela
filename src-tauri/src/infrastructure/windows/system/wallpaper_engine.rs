@@ -15,6 +15,8 @@ use crate::application::system::EngineControl;
 use crate::domain::system::{ActionOutcome, EngineCurrent, EngineLibrary, EngineWallpaper};
 
 const STEAM_DEFAULT: &str = r"C:\Program Files (x86)\Steam";
+/// Dónde guarda Tesela la carpeta de Wallpaper Engine que indicó la persona (cuando no está en la ruta de siempre).
+const SETTINGS_FILE: &str = "wallpaper-engine.json";
 /// Identificador de Wallpaper Engine en Steam.
 const APP_ID: &str = "431960";
 
@@ -84,12 +86,74 @@ pub fn parse_current(config: &Value) -> Vec<EngineCurrent> {
     out
 }
 
+pub fn settings_file() -> PathBuf {
+    crate::infrastructure::config_file::config_dir().join(SETTINGS_FILE)
+}
+
+/// La carpeta guardada por la persona, si el archivo existe y es válido.
+pub fn read_saved_path(file: &Path) -> Option<PathBuf> {
+    let value = json_text(&std::fs::read(file).ok()?)?;
+    value.get("path").and_then(Value::as_str).map(str::trim).filter(|p| !p.is_empty()).map(PathBuf::from)
+}
+
+pub fn write_saved_path(file: &Path, install: &Path) -> Result<(), String> {
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("no se pudo crear {}: {e}", dir.display()))?;
+    }
+    let tmp = file.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::json!({ "path": install.to_string_lossy() }).to_string()).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, file).map_err(|e| e.to_string())
+}
+
+fn has_exe(dir: &Path) -> bool {
+    ["wallpaper64.exe", "wallpaper32.exe"].iter().any(|n| dir.join(n).is_file())
+}
+
+/// De lo que escribió la persona saca la carpeta de instalación de Wallpaper Engine. Acepta la propia carpeta, el
+/// ejecutable, o la carpeta de Steam / su biblioteca (de donde cuelga `steamapps\common\wallpaper_engine`).
+pub fn resolve_install(input: &str) -> Result<PathBuf, String> {
+    let text = input.trim().trim_matches('"').trim();
+    if text.is_empty() {
+        return Err("Escribe la carpeta donde está instalado Wallpaper Engine".into());
+    }
+    let mut base = PathBuf::from(text);
+    if base.is_file() {
+        if let Some(parent) = base.parent() {
+            base = parent.to_path_buf();
+        }
+    }
+    let candidates = [
+        base.clone(),
+        base.join("steamapps").join("common").join("wallpaper_engine"),
+        base.join("common").join("wallpaper_engine"),
+        base.join("wallpaper_engine"),
+    ];
+    candidates
+        .into_iter()
+        .find(|c| has_exe(c))
+        .ok_or_else(|| format!("No hay Wallpaper Engine en «{text}»: falta wallpaper64.exe en esa carpeta"))
+}
+
+/// La carpeta de Steam (o de su biblioteca) de la que cuelga la instalación; si no cuelga de ninguna, la de siempre.
+fn steam_root_of(install: &Path) -> PathBuf {
+    let steamapps = install.parent().filter(|p| p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("common"))).and_then(Path::parent);
+    steamapps.filter(|p| p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("steamapps"))).and_then(Path::parent).map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from(STEAM_DEFAULT))
+}
+
 impl WallpaperEngine {
-    /// Detecta la instalación estándar de Steam; `None` si Wallpaper Engine no está.
+    /// Wallpaper Engine en la carpeta que indicó la persona o, si no, en la instalación estándar de Steam; `None` si no está.
     pub fn detect() -> Option<Self> {
-        let steam = PathBuf::from(STEAM_DEFAULT);
-        let install = steam.join("steamapps").join("common").join("wallpaper_engine");
-        install.join("wallpaper64.exe").is_file().then(|| Self::at(install, steam))
+        if let Some(saved) = read_saved_path(&settings_file()).and_then(|p| resolve_install(&p.to_string_lossy()).ok()) {
+            return Some(Self::from_install(saved));
+        }
+        let install = PathBuf::from(STEAM_DEFAULT).join("steamapps").join("common").join("wallpaper_engine");
+        has_exe(&install).then(|| Self::from_install(install))
+    }
+
+    /// A partir de una carpeta de instalación ya comprobada.
+    pub fn from_install(install: PathBuf) -> Self {
+        let steam = steam_root_of(&install);
+        Self::at(install, steam)
     }
 
     fn at(install: PathBuf, steam: PathBuf) -> Self {
@@ -233,6 +297,52 @@ mod tests {
         if let Some(p) = preview {
             std::fs::write(d.join(p), b"x").unwrap();
         }
+    }
+
+    fn fake_install(root: &Path) -> PathBuf {
+        let install = root.join("steamapps").join("common").join("wallpaper_engine");
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::write(install.join("wallpaper64.exe"), b"x").unwrap();
+        install
+    }
+
+    #[test]
+    fn la_ruta_se_acepta_como_carpeta_ejecutable_o_biblioteca_de_steam() {
+        let root = temp("ruta");
+        let install = fake_install(&root);
+        for input in [
+            install.to_string_lossy().to_string(),
+            format!("  \"{}\"  ", install.display()),
+            install.join("wallpaper64.exe").to_string_lossy().to_string(),
+            root.to_string_lossy().to_string(),
+            root.join("steamapps").to_string_lossy().to_string(),
+        ] {
+            assert_eq!(resolve_install(&input).unwrap(), install, "{input}");
+        }
+        assert!(resolve_install("").unwrap_err().contains("Escribe la carpeta"));
+        assert!(resolve_install(&root.join("otra").to_string_lossy()).unwrap_err().contains("falta wallpaper64.exe"));
+    }
+
+    #[test]
+    fn la_ruta_elegida_se_guarda_y_se_lee_y_un_archivo_roto_se_ignora() {
+        let root = temp("guardada");
+        let file = root.join("ajustes").join("wallpaper-engine.json");
+        assert_eq!(read_saved_path(&file), None);
+        write_saved_path(&file, Path::new(r"D:\Juegos\Steam\steamapps\common\wallpaper_engine")).unwrap();
+        assert_eq!(read_saved_path(&file), Some(PathBuf::from(r"D:\Juegos\Steam\steamapps\common\wallpaper_engine")));
+        std::fs::write(&file, "{ roto").unwrap();
+        assert_eq!(read_saved_path(&file), None);
+    }
+
+    #[test]
+    fn los_fondos_se_buscan_en_la_biblioteca_de_steam_de_la_instalacion() {
+        let root = temp("biblioteca-steam");
+        let install = fake_install(&root);
+        let engine = WallpaperEngine::from_install(install.clone());
+        assert!(engine.source_dirs().contains(&root.join("steamapps").join("workshop").join("content").join(APP_ID)));
+        assert!(engine.source_dirs().contains(&install.join("projects").join("myprojects")));
+        // Una instalación suelta (sin Steam) sigue sin romperse: usa la ruta de Steam de siempre.
+        assert_eq!(steam_root_of(Path::new(r"E:\Portable\WE")), PathBuf::from(STEAM_DEFAULT));
     }
 
     #[test]

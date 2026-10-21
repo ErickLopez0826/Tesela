@@ -15,13 +15,26 @@ use crate::domain::windows_settings;
 use crate::domain::startup::{exe_of_path, AppSuggestion};
 use crate::domain::utility::{is_launchable, OpenApp};
 
-/// ¿Se puede abrir esto? Un `.exe` o acceso directo con ruta absoluta, o la dirección de una app empaquetada (Teams…).
+/// ¿Se puede abrir esto? Un `.exe` o acceso directo con ruta absoluta, la dirección de una app empaquetada (Teams…) o el acceso
+/// directo de Internet de un juego de Steam (`.url`, de los que el escáner ya comprobó que son `steam://rungameid/…`).
 fn can_launch(path: &str) -> Result<(), String> {
     if packaged::is_launch_path(path) {
         packaged::validate_launch_path(path)
+    } else if is_url_shortcut(path) {
+        // Mismas reglas de ruta que un `.lnk` (absoluta, sin `..`, sin caracteres raros): se comprueba con la extensión cambiada.
+        is_launchable(&format!("{}lnk", &path[..path.len() - 3]))
     } else {
         is_launchable(path)
     }
+}
+
+/// Las apps empaquetadas y los juegos de Steam (`.url`) no se pueden abrir como administrador desde fuera: se abren normal.
+fn can_elevate(path: &str) -> bool {
+    !packaged::is_launch_path(path) && !is_url_shortcut(path)
+}
+
+fn is_url_shortcut(path: &str) -> bool {
+    path.len() > 4 && path.is_char_boundary(path.len() - 4) && path[path.len() - 4..].eq_ignore_ascii_case(".url")
 }
 
 /// Puerto: lo que el buscador necesita del sistema.
@@ -58,6 +71,8 @@ struct Entry {
 
 /// Letras mínimas para que salgan páginas de la Configuración de Windows: con una sola, sus decenas de nombres taparían a las aplicaciones.
 const MIN_SETTINGS_QUERY: usize = 2;
+/// Puntos que pierde una página de la Configuración frente a una aplicación (la cercanía de longitud va de 0 a 10).
+const SETTINGS_PENALTY: f64 = 6.0;
 
 /// Cuántos identificadores se recuerdan: las consultas llegan mientras se escribe y la interfaz descarta las viejas, pero
 /// la respuesta de una consulta anterior puede terminar después; así los identificadores de ambas siguen siendo válidos.
@@ -138,6 +153,12 @@ impl SearchService {
         }
 
         let mut ranked = rank(text, candidates, usage, now);
+        // A igualdad de coincidencia, las aplicaciones del usuario van antes que las páginas de la Configuración (p. ej. «wallpaper»
+        // debe sacar primero Wallpaper Engine que la página «Fondo»). El orden se mantiene entre las que empatan.
+        for r in ranked.iter_mut().filter(|r| r.candidate.key.starts_with("setting:")) {
+            r.score -= SETTINGS_PENALTY;
+        }
+        ranked.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
         // «palabra texto» de una búsqueda web: va por encima de todo lo demás salvo una redirección exacta.
         if let Some(search) = parse_web_search(text, redirects) {
@@ -195,16 +216,16 @@ impl SearchService {
             }
             Target::Launch { path } => {
                 can_launch(&path)?;
-                host.launch(&path, as_admin)?;
+                host.launch(&path, as_admin && can_elevate(&path))?;
             }
             Target::Focus { handle, path } => {
                 // Una app empaquetada no se puede elevar desde fuera: con ctrl+Enter solo se enfoca.
-                if as_admin && !packaged::is_launch_path(&path) && is_launchable(&path).is_ok() {
+                if as_admin && can_elevate(&path) && is_launchable(&path).is_ok() {
                     host.launch(&path, true)?;
                 } else if host.focus(handle).is_err() {
                     // La ventana ya no existe: se abre otra.
                     can_launch(&path)?;
-                    host.launch(&path, as_admin)?;
+                    host.launch(&path, as_admin && can_elevate(&path))?;
                 }
             }
         }
@@ -562,5 +583,23 @@ mod tests {
         record_usage(&mut usage, "setting:ms-settings:privacy", 0);
         let items = svc.query(h, "", &[], &usage, 0);
         assert_eq!(titles(&items), ["Privacidad y seguridad"]);
+    }
+
+    #[test]
+    fn un_juego_de_steam_se_abre_por_su_acceso_directo_y_nunca_se_eleva() {
+        let game = AppSuggestion { name: "Wallpaper Engine".into(), exe: "steam-431960".into(), path: r"C:\Menu\Steam\Wallpaper Engine.url".into(), running: false };
+        let (svc, mut h) = (SearchService::new(), FakeHost { apps: vec![game], ..Default::default() });
+        let items = query(&svc, &mut h, "wallpaper", &[]);
+        svc.open(&mut h, &items[0].id, true).unwrap();
+        assert_eq!(h.launched, vec![(r"C:\Menu\Steam\Wallpaper Engine.url".to_string(), false)]);
+    }
+
+    #[test]
+    fn los_accesos_de_internet_solo_se_abren_con_ruta_absoluta_valida() {
+        assert!(can_launch(r"C:\Menu\Steam\Juego.url").is_ok());
+        assert!(can_launch(r"C:\Menu\Steam\Juego.URL").is_ok());
+        for bad in ["Juego.url", r"..\Juego.url", r"C:\Menu\..\Juego.url", r#"C:\Menu\"Juego".url"#, "https://example.com/a.url", ".url"] {
+            assert!(can_launch(bad).is_err(), "{bad}");
+        }
     }
 }

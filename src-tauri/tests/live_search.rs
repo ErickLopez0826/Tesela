@@ -234,6 +234,22 @@ fn la_configuracion_de_windows_aparece_con_su_engranaje_y_se_acepta_al_abrirla()
 }
 
 #[test]
+#[ignore = "lee el menú Inicio real; NO abre nada"]
+fn las_herramientas_del_sistema_salen_con_su_nombre_en_el_idioma_de_windows() {
+    let mut host = RecordingHost { real: Win32SearchHost::new(Default::default()), launched: Vec::new() };
+    let svc = SearchService::new();
+    for (text, wanted) in [("administrador de tareas", "Administrador de tareas"), ("explorador", "Explorador de archivos"), ("panel de control", "Panel de control"), ("ejecutar", "Ejecutar"), ("editor del registro", "Editor del Registro"), ("servicios", "Servicios")] {
+        let items = svc.query(&mut host, text, &[], &HashMap::new(), 0);
+        eprintln!("«{text}» -> {:?}", items.iter().map(|i| i.title.as_str()).collect::<Vec<_>>());
+        let hit = items.iter().find(|i| i.title.eq_ignore_ascii_case(wanted)).unwrap_or_else(|| panic!("«{text}» no encuentra {wanted}: {items:?}"));
+        host.launched.clear();
+        svc.open(&mut host, &hit.id, false).unwrap_or_else(|e| panic!("{wanted} se rechazó: {e}"));
+        assert_eq!(host.launched.len(), 1, "{wanted}");
+        eprintln!("   se abriría: {:?}; icono: {}", host.launched[0], svc.icon_path(&hit.id).and_then(|p| icons::file_icon_png(&p)).is_some());
+    }
+}
+
+#[test]
 #[ignore = "lee iconos de programas reales"]
 fn el_icono_sale_del_archivo_y_no_es_el_generico_de_la_extension() {
     let (notepad, explorer) = (r"C:\Windows\System32\notepad.exe", r"C:\Windows\explorer.exe");
@@ -246,4 +262,35 @@ fn el_icono_sale_del_archivo_y_no_es_el_generico_de_la_extension() {
     assert_eq!(&a[1..4], b"PNG");
     assert_ne!(a, b, "dos programas distintos no deben compartir el icono genérico de .exe");
     assert!(icons::file_icon_url(notepad).unwrap().starts_with("data:image/png;base64,"));
+}
+
+#[test]
+#[ignore = "vuelca los nombres que ofrece el buscador (para compararlos con el menú Inicio)"]
+fn vuelca_las_apps_del_buscador() {
+    use tesela_lib::application::search::SearchHost;
+    let names: Vec<String> = Win32SearchHost::new(Default::default()).apps().into_iter().map(|a| a.name).collect();
+    if let Ok(path) = std::env::var("WM_APPS_OUT") {
+        std::fs::write(path, names.join("\n")).unwrap();
+    }
+    eprintln!("{} apps", names.len());
+}
+
+#[test]
+#[ignore = "lee el menú Inicio real; NO abre nada"]
+fn los_juegos_de_steam_del_menu_inicio_se_encuentran_con_su_icono_y_sin_elevar() {
+    use tesela_lib::application::search::SearchHost;
+    let mut host = RecordingHost { real: Win32SearchHost::new(Default::default()), launched: Vec::new() };
+    let games: Vec<_> = host.apps().into_iter().filter(|a| a.path.to_lowercase().ends_with(".url")).collect();
+    eprintln!("juegos de Steam: {:?}", games.iter().map(|g| g.name.as_str()).collect::<Vec<_>>());
+    assert!(games.iter().all(|g| g.exe.starts_with("steam-")), "solo juegos, no páginas web");
+    let svc = SearchService::new();
+    for game in games {
+        let items = svc.query(&mut host, &game.name, &[], &HashMap::new(), 0);
+        let hit = items.iter().find(|i| i.title == game.name).unwrap_or_else(|| panic!("no se encuentra {}", game.name));
+        host.launched.clear();
+        svc.open(&mut host, &hit.id, true).unwrap_or_else(|e| panic!("{} se rechazó: {e}", game.name));
+        // Con ctrl+Enter también se abre sin elevar: un juego de Steam no se puede elevar desde fuera.
+        assert_eq!(host.launched, vec![(game.path.clone(), false)]);
+        eprintln!("  {} -> icono: {}", game.name, icons::file_icon_png(&game.path).is_some());
+    }
 }

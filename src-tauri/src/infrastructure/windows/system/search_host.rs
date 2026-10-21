@@ -34,7 +34,8 @@ impl SearchHost for Win32SearchHost {
 
     fn launch(&mut self, path: &str, as_admin: bool) -> Result<(), String> {
         // Una app empaquetada no se puede elevar desde fuera (Windows no lo permite con `runas`): se abre normal.
-        if as_admin && !crate::domain::packaged::is_launch_path(path) {
+        // Ni las apps empaquetadas ni los juegos de Steam (`.url`) se pueden elevar desde fuera.
+        if as_admin && !crate::domain::packaged::is_launch_path(path) && !path.to_lowercase().ends_with(".url") {
             launch_elevated(path)
         } else {
             self.apps.launch(path)

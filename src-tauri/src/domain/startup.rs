@@ -59,6 +59,38 @@ pub fn exe_of_path(path: &str) -> String {
     normalize_exe(file)
 }
 
+/// Programas del sistema con acceso directo en el menú Inicio que no apuntan a un archivo (el destino es un objeto del shell): su
+/// nombre de archivo, que es siempre el inglés, y el programa de su ventana.
+const SHELL_LINKS: [(&str, &str); 3] = [("file explorer", "explorer"), ("control panel", "control"), ("run", "run")];
+
+/// ¿Es el acceso directo de un programa que se puede abrir desde el buscador? Devuelve el ejecutable de su ventana (normalizado).
+/// Cuentan los programas (`.exe`), las consolas de administración (`.msc`: Servicios, Visor de eventos…), los paneles (`.cpl`) y los
+/// tres accesos del sistema sin destino de archivo (Explorador, Panel de control y Ejecutar). Los documentos, páginas web (`.url`),
+/// carpetas y demás destinos no son programas: se descartan. `stem` es el nombre del archivo del acceso directo.
+pub fn shortcut_exe(target: &str, stem: &str) -> Option<String> {
+    let lower = target.trim().to_lowercase();
+    if lower.is_empty() {
+        let stem = stem.trim().to_lowercase();
+        return SHELL_LINKS.iter().find(|(name, _)| *name == stem).map(|(_, exe)| exe.to_string());
+    }
+    if lower.ends_with(".exe") {
+        return Some(exe_of_path(target)).filter(|e| !e.is_empty());
+    }
+    if lower.ends_with(".msc") {
+        return Some("mmc".into());
+    }
+    lower.ends_with(".cpl").then(|| "control".into())
+}
+
+/// Identificador de un juego de Steam si el contenido de un acceso directo de Internet (`.url`) es `steam://rungameid/<número>`. Es lo
+/// único que se acepta de esos archivos: las páginas web (documentación, soporte…) no son programas.
+pub fn steam_game_id(url_file: &str) -> Option<String> {
+    url_file.lines().find_map(|line| {
+        let id = line.trim().strip_prefix("URL=")?.trim().strip_prefix("steam://rungameid/")?;
+        (!id.is_empty() && id.len() <= 12 && id.chars().all(|c| c.is_ascii_digit())).then(|| id.to_string())
+    })
+}
+
 /// Ejecutable al que pertenece la ventana de una aplicación: los accesos directos de las «apps» de Chrome, Edge o Brave
 /// apuntan a `chrome_proxy.exe`, pero su ventana es de `chrome.exe`.
 pub fn window_exe(exe: &str) -> String {
@@ -152,5 +184,25 @@ mod tests {
         let many: Vec<_> = (0..=MAX_STARTUP_APPS).map(|i| app(&format!(r"C:\a{i}.exe"), 1)).collect();
         assert!(validate(many).is_err());
         assert_eq!(validate(vec![]).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn los_accesos_directos_de_programas_del_sistema_cuentan_y_los_documentos_no() {
+        assert_eq!(shortcut_exe(r"C:\Windows\System32\Taskmgr.exe", "Task Manager").as_deref(), Some("taskmgr"));
+        assert_eq!(shortcut_exe(r"C:\Windows\system32\services.msc", "services").as_deref(), Some("mmc"));
+        assert_eq!(shortcut_exe(r"C:\Windows\system32\main.cpl", "Mouse").as_deref(), Some("control"));
+        // Sin destino de archivo: solo los tres del sistema, por su nombre.
+        assert_eq!(shortcut_exe("", "File Explorer").as_deref(), Some("explorer"));
+        assert_eq!(shortcut_exe("", "control panel").as_deref(), Some("control"));
+        assert_eq!(shortcut_exe("", "Run").as_deref(), Some("run"));
+        assert_eq!(shortcut_exe("", "Sticky Notes"), None);
+        assert_eq!(steam_game_id("[InternetShortcut]\nURL=steam://rungameid/431960\nIconFile=C:/x.ico\n").as_deref(), Some("431960"));
+        assert_eq!(steam_game_id("[InternetShortcut]\r\nURL=steam://rungameid/250900\r\n").as_deref(), Some("250900"));
+        for no in ["URL=https://nodejs.org/", "URL=steam://rungameid/", "URL=steam://rungameid/12;calc", "URL=steam://run/5", "URL=file:///C:/x.exe", ""] {
+            assert_eq!(steam_game_id(no), None, "{no}");
+        }
+        for doc in [r"C:\Docs\guia.pdf", r"C:\Docs\index.htm", r"C:\Kits\ayuda.url", r"C:\xampp\htdocs", r"C:\x\wsl.ico", r"C:\x\datos.zip"] {
+            assert_eq!(shortcut_exe(doc, "Cualquiera"), None, "{doc}");
+        }
     }
 }

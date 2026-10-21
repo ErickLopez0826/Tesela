@@ -212,6 +212,13 @@ pub fn run() {
             interface::commands::media_command,
             interface::commands::media_thumbnail,
             interface::commands::battery_get,
+            interface::commands::claude_activity_get,
+            interface::commands::claude_hooks_status,
+            interface::commands::claude_usage_get,
+            interface::commands::claude_usage_set_enabled,
+            interface::commands::claude_usage_refresh,
+            interface::commands::claude_hooks_install,
+            interface::commands::claude_hooks_uninstall,
             interface::commands::volume_get,
             interface::commands::volume_set,
             interface::commands::volume_mute,
@@ -230,6 +237,7 @@ pub fn run() {
             interface::commands::clipboard_write,
             interface::commands::engine_library,
             interface::commands::engine_apply,
+            interface::commands::engine_set_path,
             interface::commands::wifi_networks,
             interface::commands::wifi_connect,
             interface::commands::wifi_disconnect,
@@ -275,6 +283,11 @@ pub fn run() {
             *handle_slot.lock().unwrap() = Some(app.handle().clone());
             #[cfg(windows)]
             setup_windows(app, &args, &store, config.clone(), warning.clone(), &focus_sink);
+            // Lectura del uso de Claude: el hilo solo actúa si la persona activó la función.
+            #[cfg(windows)]
+            infrastructure::windows::system::claude_usage::start_poller();
+            // El script de los hooks (si ya estaba instalado) se pone al día con el del programa.
+            infrastructure::claude_store::refresh_script(&infrastructure::claude_store::Paths::from_env());
             // Las miniaturas del selector de fondos se leen de su carpeta (y solo de ella).
             {
                 let dir = app.state::<interface::commands::AppState>().wallpapers_dir.clone();

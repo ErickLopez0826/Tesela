@@ -29,6 +29,7 @@
   import SettingsPanel from "./SettingsPanel.svelte";
   import ConnectivitySection from "./sections/ConnectivitySection.svelte";
   import EngineWallpapers from "./sections/EngineWallpapers.svelte";
+  import EnginePathSetup from "./sections/EnginePathSetup.svelte";
   import MonthCalendar from "./sections/MonthCalendar.svelte";
   import NotesSection from "./sections/NotesSection.svelte";
   import MediaSection from "./sections/MediaSection.svelte";
@@ -53,6 +54,7 @@
     tasks = null,
     engine = null,
     onEngineApply = async () => ({ simulated: true, description: "" }),
+    onEnginePath = null,
     onAudioChanged = () => {},
     openTick = 0,
     closeTick = 0,
@@ -86,6 +88,8 @@
     /// Biblioteca de Wallpaper Engine (pestaña Fondos); sin ella se usa la carpeta de imágenes.
     engine?: EngineLibrary | null;
     onEngineApply?: (id: string, monitor: number | null) => Promise<ActionOutcome>;
+    /// Guarda la carpeta de Wallpaper Engine cuando no se encontró sola; lanza el motivo si no sirve.
+    onEnginePath?: ((path: string) => Promise<unknown>) | null;
     /// Sube cada vez que el panel se muestra: relanza la animación de aparición.
     openTick?: number;
     /// Sube cuando el panel empieza a cerrarse: se reproduce la animación de apertura al revés.
@@ -304,6 +308,7 @@
             {#if engine?.available}
               <EngineWallpapers library={engine} onApply={onEngineApply} />
             {:else}
+              {#if onEnginePath}<EnginePathSetup onSave={onEnginePath} />{/if}
               <WallpaperSection list={wallpapers} onSet={onWallpaper} />
             {/if}
           </div>

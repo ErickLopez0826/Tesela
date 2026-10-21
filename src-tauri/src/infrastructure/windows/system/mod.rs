@@ -5,6 +5,7 @@ pub mod app_audio;
 pub mod apps;
 pub mod background;
 pub mod battery;
+pub mod claude_usage;
 pub mod clipboard;
 pub mod installed_apps;
 pub mod media;

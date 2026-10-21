@@ -200,6 +200,7 @@ export const systemApi = {
   openSettings: (page: SettingsPage) => invoke<void>("open_windows_settings", { page }),
   engineLibrary: () => invoke<EngineLibrary>("engine_library"),
   engineApply: (id: string, monitor: number | null) => invoke<ActionOutcome>("engine_apply", { id, monitor }),
+  engineSetPath: (path: string) => invoke<EngineLibrary>("engine_set_path", { path }),
   powerRun: (action: PowerActionName) => invoke<ActionOutcome>("power_run", { action }),
   wallpapersList: () => invoke<WallpaperList>("wallpapers_list"),
   wallpaperSet: (name: string) => invoke<ActionOutcome>("wallpaper_set", { name }),

@@ -7,10 +7,10 @@
   import Marquee from "./Marquee.svelte";
   import ModuleFrame from "./ModuleFrame.svelte";
   import GlassBackdrop from "./GlassBackdrop.svelte";
-  import WeatherIcon from "./WeatherIcon.svelte";
   import BatteryIcon from "./BatteryIcon.svelte";
+  import ClaudeUsage from "./ClaudeUsage.svelte";
+  import type { ClaudeActivity, UsageView } from "../api/claude";
   import { describeBattery, isLow, type BatteryState } from "../stores/battery";
-  import { describeWeather } from "../stores/weather";
   import { theme } from "../stores/theme";
   import { formatClock, formatPercent, ramPercent, workspacesFor } from "../stores/wmState";
 
@@ -21,12 +21,14 @@
     now,
     volume = null,
     battery = null,
+    claude = null,
     gpu = null,
-    temperature = null,
-    weatherCode = null,
+    claudeUsage = null,
     modules = [],
     onWorkspace,
     onMute = () => {},
+    onUsageHover = () => {},
+    onUsageLeave = () => {},
   }: {
     monitorId: number;
     state: StateSnapshot | null;
@@ -35,18 +37,22 @@
     volume?: VolumeState | null;
     /** Batería del equipo; sin ella (un equipo de escritorio) no se muestra nada. */
     battery?: BatteryState | null;
+    /** Qué hace Claude Code; sin sesiones activas (o sin los hooks puestos) no se muestra nada. */
+    claude?: ClaudeActivity | null;
     gpu?: number | null;
-    temperature?: number | null;
+    /** Uso de la suscripción de Claude (función opcional de Ajustes); sin lectura no se muestra nada. */
+    claudeUsage?: UsageView | null;
     /** Código WMO del tiempo actual: la barra lo muestra como icono junto a la temperatura. */
     weatherCode?: number | null;
     modules?: InstalledModule[];
     onWorkspace: (number: number) => void;
     onMute?: (muted: boolean) => void;
+    /** El cursor entra en el uso de Claude (rectángulo del anillo en px lógicos) / sale de él: abre y cierra su tarjeta. */
+    onUsageHover?: (anchor: { x: number; y: number; w: number; h: number }) => void;
+    onUsageLeave?: () => void;
   } = $props();
 
   const workspaces = $derived(workspacesFor(state, monitorId));
-  // De noche el cielo despejado se muestra como luna.
-  const night = $derived(now.getHours() < 6 || now.getHours() >= 19);
   const barModules = $derived(modules.filter((m) => m.enabled && m.manifest.ui.bar));
 
   // Datos de la derecha en orden; entre cada par visible va un separador de tres puntos.
@@ -54,7 +60,7 @@
     ...barModules.map((m) => `mod:${m.manifest.id}`),
     ...(stats ? ["cpu", "ram"] : []),
     ...(gpu !== null ? ["gpu"] : []),
-    ...(temperature !== null ? ["temp"] : []),
+    ...(claudeUsage && (claudeUsage.status === "ok" || claudeUsage.status === "stale") && claudeUsage.windows.length > 0 ? ["usage"] : []),
     ...(volume ? ["vol"] : []),
     ...(battery ? ["bat"] : []),
     "clock",
@@ -88,11 +94,8 @@
         <span class="stat" title="RAM">RAM {formatPercent(ramPercent(stats))}</span>
       {:else if key === "gpu" && gpu !== null}
         <span class="stat" title="Tarjeta gráfica">GPU {formatPercent(gpu)}</span>
-      {:else if key === "temp" && temperature !== null}
-        <span class="stat weather" title={weatherCode === null ? "Temperatura" : describeWeather(weatherCode)} role="img" aria-label={weatherCode === null ? `${Math.round(temperature)} °C` : `${describeWeather(weatherCode)}, ${Math.round(temperature)} °C`}>
-          {#if weatherCode !== null}<WeatherIcon code={weatherCode} night={night} size={17} />{/if}
-          {Math.round(temperature)} °C
-        </span>
+      {:else if key === "usage" && claudeUsage}
+        <ClaudeUsage usage={claudeUsage} working={claude?.activity === "working"} onHover={onUsageHover} onLeave={onUsageLeave} />
       {:else if key === "vol" && volume}
         <button class="stat vol" aria-label={volume.muted ? "Activar sonido" : "Silenciar"} onclick={() => onMute(!volume.muted)}>
           <Icon name={volume.muted ? "volume-off" : "volume"} size={14} /> {Math.round(volume.percent)}%
@@ -127,8 +130,6 @@
   }
   /* Tinte del cristal: su opacidad es la de Personalización. Las zonas van por encima. */
   .tint { position: absolute; inset: 0; z-index: 0; pointer-events: none; background: rgba(10, 10, 11, var(--bar-alpha, 0.58)); }
-  .weather { display: inline-flex; align-items: center; gap: 6px; }
-  .weather :global(.weather-icon) { filter: none; color: inherit; }
   .zone { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
   .left { justify-content: flex-start; position: relative; }
   .center { justify-content: center; overflow: hidden; opacity: 0.85; }

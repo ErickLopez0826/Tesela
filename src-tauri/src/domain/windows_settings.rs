@@ -25,7 +25,7 @@ const fn page(name: &'static str, uri: &'static str, aliases: &'static [&'static
 
 /// Las páginas que ofrece el buscador, con los nombres de la Configuración de Windows 11 en español.
 pub const PAGES: &[SettingsPage] = &[
-    page("Configuración", "ms-settings:", &["Ajustes", "Settings", "Windows", "Panel de control"]),
+    page("Configuración", "ms-settings:", &["Ajustes", "Settings", "Windows"]),
     page("Pantalla", "ms-settings:display", &["Display", "Resolución", "Brillo", "Monitor", "Escala"]),
     page("Sonido", "ms-settings:sound", &["Audio", "Sound", "Volumen", "Altavoces", "Micrófono"]),
     page("Notificaciones", "ms-settings:notifications", &["Notifications", "No molestar", "Avisos"]),

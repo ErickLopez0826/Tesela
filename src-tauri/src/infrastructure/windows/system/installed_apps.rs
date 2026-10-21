@@ -8,11 +8,11 @@ use std::time::{Duration, Instant};
 use windows::core::{Interface, HSTRING};
 use windows::Win32::Storage::FileSystem::WIN32_FIND_DATAW;
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, STGM_READ};
-use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+use windows::Win32::UI::Shell::{IShellLinkW, SHGetFileInfoW, ShellLink, SHFILEINFOW, SHGFI_DISPLAYNAME};
 
 use crate::application::system::AppsControl;
 use crate::domain::packaged;
-use crate::domain::startup::{exe_of_path, merge_suggestions, AppSuggestion};
+use crate::domain::startup::{exe_of_path, merge_suggestions, shortcut_exe, steam_game_id, AppSuggestion};
 use crate::infrastructure::windows::system::apps::Win32Apps;
 
 /// El menú Inicio cambia poco: se reutiliza la lectura un rato.
@@ -44,13 +44,13 @@ fn collect_shortcuts(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
             if depth < 4 {
                 collect_shortcuts(&path, depth + 1, out);
             }
-        } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("lnk")) {
+        } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("lnk") || e.eq_ignore_ascii_case("url")) {
             out.push(path);
         }
     }
 }
 
-/// Programa al que apunta un acceso directo (`None` si no apunta a un `.exe`, como las apps de la Tienda).
+/// Destino de un acceso directo (vacío si apunta a un objeto del shell, como el Explorador de archivos). `None` si no se pudo leer.
 fn shortcut_target(lnk: &Path) -> Option<String> {
     unsafe {
         let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
@@ -58,9 +58,23 @@ fn shortcut_target(lnk: &Path) -> Option<String> {
         let mut buf = [0u16; 520];
         link.GetPath(&mut buf, std::ptr::null_mut::<WIN32_FIND_DATAW>(), 0).ok()?;
         let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-        let target = String::from_utf16_lossy(&buf[..len]);
-        target.to_lowercase().ends_with(".exe").then_some(target)
+        Some(String::from_utf16_lossy(&buf[..len]))
     }
+}
+
+/// Nombre con el que Windows enseña un acceso directo (el del menú Inicio, ya en el idioma del sistema: «Administrador de tareas» y
+/// no «Task Manager», que es el nombre del archivo). `None` si el shell no lo da.
+fn display_name(path: &Path) -> Option<String> {
+    let mut info = SHFILEINFOW::default();
+    let file = HSTRING::from(path.as_os_str());
+    let ok = unsafe { SHGetFileInfoW(&file, Default::default(), Some(&mut info), size_of::<SHFILEINFOW>() as u32, SHGFI_DISPLAYNAME) };
+    if ok == 0 {
+        return None;
+    }
+    let len = info.szDisplayName.iter().position(|&c| c == 0).unwrap_or(info.szDisplayName.len());
+    let name = String::from_utf16_lossy(&info.szDisplayName[..len]);
+    let name = name.trim().strip_suffix(".lnk").unwrap_or(name.trim()).trim().to_string();
+    (!name.is_empty()).then_some(name)
 }
 
 fn scan_installed() -> Vec<AppSuggestion> {
@@ -75,12 +89,18 @@ fn scan_installed() -> Vec<AppSuggestion> {
         if !is_program_name(&stem) {
             continue;
         }
-        let Some(target) = shortcut_target(&lnk) else { continue };
-        let exe = exe_of_path(&target);
-        if exe.is_empty() {
+        // Un `.url` solo cuenta si es un juego de Steam (Wallpaper Engine, Mewgenics…); sus páginas web no.
+        if lnk.extension().is_some_and(|e| e.eq_ignore_ascii_case("url")) {
+            let game = std::fs::read(&lnk).ok().filter(|b| b.len() <= 4096).and_then(|b| steam_game_id(&String::from_utf8_lossy(&b)));
+            if let Some(id) = game {
+                apps.push(AppSuggestion { name: stem, exe: format!("steam-{id}"), path: lnk.to_string_lossy().to_string(), running: false });
+            }
             continue;
         }
-        apps.push(AppSuggestion { name: stem, exe, path: lnk.to_string_lossy().to_string(), running: false });
+        let Some(target) = shortcut_target(&lnk) else { continue };
+        let Some(exe) = shortcut_exe(&target, &stem) else { continue };
+        let name = display_name(&lnk).filter(|n| is_program_name(n)).unwrap_or(stem);
+        apps.push(AppSuggestion { name, exe, path: lnk.to_string_lossy().to_string(), running: false });
     }
     if init.is_ok() {
         unsafe { CoUninitialize() };

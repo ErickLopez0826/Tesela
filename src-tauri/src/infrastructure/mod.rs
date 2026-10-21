@@ -1,5 +1,6 @@
 //! Infraestructura: adaptadores a Windows y al sistema de archivos.
 
+pub mod claude_store;
 pub mod config_file;
 pub mod exclusion_store;
 pub mod module_store;

@@ -6,6 +6,7 @@ use tauri::State;
 use crate::application::list_windows as use_case;
 use crate::application::ports::SystemStatsProvider;
 use crate::domain::battery::BatteryState;
+use crate::infrastructure::claude_store;
 use crate::domain::actions::Action;
 use crate::application::system::{list_wallpapers, resolve_wallpaper, SystemServices};
 use crate::application::modules::{ModuleApi, StateSource};
@@ -250,6 +251,7 @@ pub async fn glass_image(
         }
         "panel" => blocking(move || Ok(backdrop::panel_image(blur, scale, refresh))).await,
         "search" => blocking(move || Ok(backdrop::search_image(blur, scale, refresh))).await,
+        "popup" => blocking(move || Ok(backdrop::popup_image(blur, scale, refresh))).await,
         other => Err(format!("fondo desconocido: {other}")),
     }
 }
@@ -427,12 +429,12 @@ pub async fn app_action_run(exe: String, id: String) -> Result<(), String> {
 /// (px lógicos de cliente de su ventana); el núcleo lo pasa a pantalla.
 #[cfg(windows)]
 #[tauri::command]
-pub fn popup_open(app: tauri::AppHandle, window: tauri::WebviewWindow, exe: String, name: String, path: String, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
+pub fn popup_open(app: tauri::AppHandle, window: tauri::WebviewWindow, exe: String, name: String, path: String, x: f64, y: f64, w: f64, h: f64, hover: Option<bool>) -> Result<(), String> {
     use crate::domain::geometry::Rect;
     let pos = window.outer_position().map_err(|e| e.to_string())?;
     let scale = window.scale_factor().unwrap_or(1.0);
     let anchor = Rect::new(pos.x + (x * scale).round() as i32, pos.y + (y * scale).round() as i32, (w * scale).round() as i32, (h * scale).round() as i32);
-    crate::interface::popup::open(&app, anchor, &exe, &name, &path);
+    crate::interface::popup::open(&app, anchor, &exe, &name, &path, hover.unwrap_or(false));
     Ok(())
 }
 
@@ -631,6 +633,67 @@ pub async fn battery_get() -> Result<Option<BatteryState>, String> {
     blocking(|| Ok(crate::infrastructure::windows::system::battery::read())).await
 }
 
+/// Qué hace Claude Code ahora (trabajando, esperando o parado), según los avisos de sus hooks.
+#[tauri::command]
+pub async fn claude_activity_get() -> Result<claude_store::ActivityView, String> {
+    blocking(|| Ok(claude_store::read_activity(&claude_store::Paths::from_env(), claude_store::now_secs()))).await
+}
+
+/// Uso de la suscripción de Claude (5 h y semanal). Solo tiene datos si la persona activó la función en Ajustes.
+#[tauri::command]
+pub async fn claude_usage_get() -> Result<crate::application::claude_usage::UsageView, String> {
+    blocking(|| Ok(crate::infrastructure::windows::system::claude_usage::service().view())).await
+}
+
+/// Activa o apaga la lectura del uso. Al activar se lee enseguida; al apagar se olvida lo leído.
+#[tauri::command]
+pub async fn claude_usage_set_enabled(enabled: bool) -> Result<crate::application::claude_usage::UsageView, String> {
+    use crate::infrastructure::windows::system::claude_usage as live;
+    blocking(move || {
+        let paths = claude_store::Paths::from_env();
+        live::write_enabled(&paths, enabled)?;
+        let svc = live::service();
+        svc.set_enabled(enabled);
+        if enabled {
+            let now = claude_store::now_secs();
+            svc.attempt(&mut live::LivePort { paths }, now, now * 1000, false);
+        }
+        Ok(svc.view())
+    })
+    .await
+}
+
+/// Pide una lectura ahora (respeta la espera mínima y la que pida el servidor).
+#[tauri::command]
+pub async fn claude_usage_refresh() -> Result<crate::application::claude_usage::UsageView, String> {
+    use crate::infrastructure::windows::system::claude_usage as live;
+    blocking(|| {
+        let svc = live::service();
+        let now = claude_store::now_secs();
+        svc.attempt(&mut live::LivePort { paths: claude_store::Paths::from_env() }, now, now * 1000, true);
+        Ok(svc.view())
+    })
+    .await
+}
+
+/// Si los hooks de Tesela están puestos en el `settings.json` de Claude Code.
+#[tauri::command]
+pub async fn claude_hooks_status() -> Result<claude_store::HooksStatus, String> {
+    blocking(|| Ok(claude_store::hooks_status(&claude_store::Paths::from_env()))).await
+}
+
+/// Pone los hooks (con copia de seguridad de `settings.json`). Solo cuando la persona lo pide en Ajustes.
+#[tauri::command]
+pub async fn claude_hooks_install() -> Result<claude_store::HooksStatus, String> {
+    blocking(|| claude_store::install_hooks(&claude_store::Paths::from_env(), claude_store::now_secs())).await
+}
+
+/// Quita los hooks de Tesela, y solo ellos.
+#[tauri::command]
+pub async fn claude_hooks_uninstall() -> Result<claude_store::HooksStatus, String> {
+    blocking(|| claude_store::uninstall_hooks(&claude_store::Paths::from_env(), claude_store::now_secs())).await
+}
+
 #[tauri::command]
 pub async fn radio_states(state: State<'_, AppState>) -> Result<Vec<RadioState>, String> {
     let s = state.services.clone();
@@ -806,6 +869,28 @@ pub async fn clipboard_write(state: State<'_, AppState>, text: String) -> Result
 pub async fn engine_library(state: State<'_, AppState>) -> Result<EngineLibrary, String> {
     let s = state.services.clone();
     blocking(move || Ok(s.engine.lock().map_err(lock_err)?.library())).await
+}
+
+/// Guarda la carpeta de Wallpaper Engine que indicó la persona (cuando no está en la ruta de siempre) y lo empieza a usar.
+/// Devuelve la biblioteca ya leída; si la carpeta no sirve, el motivo.
+#[tauri::command]
+pub async fn engine_set_path(app: tauri::AppHandle, state: State<'_, AppState>, path: String) -> Result<EngineLibrary, String> {
+    use crate::infrastructure::windows::system::wallpaper_engine as we;
+    use tauri::Manager;
+    let s = state.services.clone();
+    blocking(move || {
+        let install = we::resolve_install(&path)?;
+        we::write_saved_path(&we::settings_file(), &install)?;
+        let engine = we::WallpaperEngine::from_install(install);
+        // Sus previsualizaciones se leen de sus carpetas de fondos.
+        for dir in engine.source_dirs() {
+            let _ = app.asset_protocol_scope().allow_directory(dir, true);
+        }
+        let mut slot = s.engine.lock().map_err(lock_err)?;
+        *slot = Box::new(engine);
+        Ok(slot.library())
+    })
+    .await
 }
 
 /// Pide a Wallpaper Engine que ponga un fondo de su biblioteca (`monitor` vacío = todos).

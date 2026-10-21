@@ -21,6 +21,13 @@ const HOVER_HALF_WIDTH: f64 = 150.0;
 const HOVER_DWELL: Duration = Duration::from_millis(160);
 /// Tiempo fuera del panel y de la zona antes de cerrarlo.
 const HOVER_LEAVE: Duration = Duration::from_millis(450);
+
+/// ¿Hay que cerrar el panel por tener el cursor fuera? Sí si lo abrió el cursor, o si el cursor ya estuvo dentro (se usó con el
+/// ratón, aunque se abriera con la tecla Windows o con un clic): al alejarse se cierra. Un panel abierto con el teclado al que
+/// el cursor nunca ha entrado no se cierra por esto (se maneja con el teclado).
+fn leave_closes(by_hover: bool, entered: bool, outside_for: Duration) -> bool {
+    (by_hover || entered) && outside_for >= HOVER_LEAVE
+}
 const PANEL_MARGIN: f64 = 12.0;
 const PANEL_LABEL: &str = "panel";
 
@@ -304,6 +311,8 @@ pub fn start_hover_trigger(app: &AppHandle) {
         let mut dwell = Duration::ZERO;
         let mut armed = true;
         let mut by_hover = false;
+        // El cursor ha estado dentro del panel desde que se abrió.
+        let mut entered = false;
         let mut outside_since: Option<Instant> = None;
         let tick = Duration::from_millis(40);
         loop {
@@ -326,6 +335,7 @@ pub fn start_hover_trigger(app: &AppHandle) {
             let visible = panel_open(&app);
             if !visible {
                 by_hover = false;
+                entered = false;
             }
 
             if let Some(m) = zone {
@@ -346,7 +356,7 @@ pub fn start_hover_trigger(app: &AppHandle) {
             // Fuera de la zona: se vuelve a armar (así Escape o un cierre no lo reabren mientras el cursor sigue ahí).
             dwell = Duration::ZERO;
             armed = true;
-            if by_hover && visible {
+            if visible {
                 let inside = panel
                     .as_ref()
                     .and_then(|w| Some((w.outer_position().ok()?, w.outer_size().ok()?)))
@@ -356,12 +366,35 @@ pub fn start_hover_trigger(app: &AppHandle) {
                     });
                 if inside {
                     outside_since = None;
-                } else if outside_since.get_or_insert_with(Instant::now).elapsed() >= HOVER_LEAVE {
+                    entered = true;
+                } else if leave_closes(by_hover, entered, outside_since.get_or_insert_with(Instant::now).elapsed()) {
                     hide_panel(&app);
+                    // Si se abrió junto a la barra de tareas (tecla Windows), esta se va con él.
+                    if let Some(id) = crate::interface::shell::cursor_monitor() {
+                        crate::interface::taskbar::hide_unless_hovered(&app, id);
+                    }
                     by_hover = false;
+                    entered = false;
+                    outside_since = None;
+                } else if !(by_hover || entered) {
                     outside_since = None;
                 }
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn el_panel_se_cierra_al_alejar_el_cursor_si_lo_abrio_el_cursor_o_ya_se_uso_con_el_raton() {
+        let mucho = HOVER_LEAVE;
+        let poco = Duration::from_millis(100);
+        assert!(leave_closes(true, false, mucho), "abierto por el cursor");
+        assert!(leave_closes(false, true, mucho), "abierto con la tecla Windows y usado con el ratón (p. ej. en Ajustes)");
+        assert!(!leave_closes(true, true, poco), "no al instante");
+        assert!(!leave_closes(false, false, Duration::from_secs(30)), "abierto con el teclado y sin tocarlo con el ratón");
+    }
 }

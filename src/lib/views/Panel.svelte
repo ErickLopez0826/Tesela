@@ -135,6 +135,11 @@
   tasks={tasksApi}
   engine={$engine}
   onEngineApply={(id, m) => after(systemApi.engineApply(id, m), refreshEngine)}
+  onEnginePath={async (p) => {
+    await systemApi.engineSetPath(p);
+    await engine.refresh();
+    refreshWallpaperTheme();
+  }}
   audio={audioApi}
   onAudioChanged={() => void volume.refresh()}
   onWallpaper={(n): Promise<ActionOutcome> => after(systemApi.wallpaperSet(n), wallpapers.refresh)}

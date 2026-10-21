@@ -1,10 +1,12 @@
 <!-- Ajustes dentro del panel desplegable: aplicaciones que Tesela no gestiona y ajustes generales. -->
 <script lang="ts">
   import { onMount } from "svelte";
+  import ClaudeSettings from "./ClaudeSettings.svelte";
   import ExclusionPanel from "./ExclusionPanel.svelte";
   import GeneralPanel from "./GeneralPanel.svelte";
   import SearchSettings from "./SearchSettings.svelte";
   import { appsApi, type StartupApp } from "../api/apps";
+  import { claudeApi } from "../api/claude";
   import { generalApi, type GeneralStatus } from "../api/general";
   import { searchSettingsApi } from "../api/search";
   import { shellApi, type ShellSettings } from "../api/shell";
@@ -14,10 +16,11 @@
   /** Sube cada vez que el panel se abre: la lista de ventanas abiertas se vuelve a leer. */
   let { tick = 0 }: { tick?: number } = $props();
 
-  type Section = "exclusions" | "search" | "general";
+  type Section = "exclusions" | "search" | "claude" | "general";
   const SECTIONS: { id: Section; label: string }[] = [
     { id: "exclusions", label: "Aplicaciones excluidas" },
     { id: "search", label: "Buscador" },
+    { id: "claude", label: "Claude" },
     { id: "general", label: "General" },
   ];
 
@@ -58,6 +61,8 @@
     />
   {:else if section === "search"}
     <SearchSettings api={searchSettingsApi} />
+  {:else if section === "claude"}
+    <ClaudeSettings api={claudeApi} />
   {:else}
     <GeneralPanel
       status={general}

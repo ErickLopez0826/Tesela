@@ -55,10 +55,22 @@ describe("SettingsPanel", () => {
     expect(invoke).toHaveBeenCalledWith("add_exclusion", expect.objectContaining({ exe: "overwatch.exe" }));
   });
 
-  it("tiene tres apartados: aplicaciones excluidas, buscador y general (ya no hay «Módulos instalados»)", async () => {
+  it("tiene cuatro apartados: aplicaciones excluidas, buscador, Claude y general (ya no hay «Módulos instalados»)", async () => {
     const { container } = render(SettingsPanel);
-    expect([...container.querySelectorAll("nav button")].map((b) => b.textContent?.trim())).toEqual(["Aplicaciones excluidas", "Buscador", "General"]);
+    expect([...container.querySelectorAll("nav button")].map((b) => b.textContent?.trim())).toEqual(["Aplicaciones excluidas", "Buscador", "Claude", "General"]);
     expect(screen.queryByText("Módulos instalados")).toBeNull();
+  });
+
+  it("el apartado Claude lee el estado de los hooks y lo enseña", async () => {
+    const base = invoke.getMockImplementation()!;
+    invoke.mockImplementation((cmd: string, ...rest: unknown[]) => {
+      if (cmd === "claude_hooks_status") return Promise.resolve({ installed: false, partial: false, settings_path: "C:/Users/x/.claude/settings.json", script_path: "C:/x/tesela-claude-hook.js", settings_ok: true });
+      return base(cmd, ...rest);
+    });
+    render(SettingsPanel);
+    await fireEvent.click(screen.getByRole("button", { name: "Claude" }));
+    expect(await screen.findByText("No instalado")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Instalar" })).toBeTruthy();
   });
 
   it("el apartado Buscador lee las redirecciones del núcleo", async () => {

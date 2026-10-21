@@ -191,6 +191,7 @@ fn capture_wallpaper(r: Rect) -> Option<Raw> {
 static BARS: Mutex<Option<HashMap<String, Raw>>> = Mutex::new(None);
 static PANEL: Mutex<Option<Raw>> = Mutex::new(None);
 static SEARCH: Mutex<Option<Raw>> = Mutex::new(None);
+static POPUP: Mutex<Option<Raw>> = Mutex::new(None);
 
 /// Imagen para la barra `label`, que ocupa `r`. Con `refresh` (o sin copia previa, o si cambió de sitio) se vuelve a copiar el fondo.
 pub fn bar_image(label: &str, r: Rect, intensity: f32, scale: f64, refresh: bool) -> Option<GlassImage> {
@@ -242,6 +243,16 @@ pub fn remember_search(r: Rect) {
 /// Imagen para el buscador.
 pub fn search_image(intensity: f32, scale: f64, refresh: bool) -> Option<GlassImage> {
     slot_image(&SEARCH, intensity, scale, refresh)
+}
+
+/// Guarda lo que hay detrás de la tarjeta emergente (llamar justo antes de mostrarla).
+pub fn remember_popup(r: Rect) {
+    *POPUP.lock().unwrap() = capture_screen(r);
+}
+
+/// Imagen para la tarjeta emergente.
+pub fn popup_image(intensity: f32, scale: f64, refresh: bool) -> Option<GlassImage> {
+    slot_image(&POPUP, intensity, scale, refresh)
 }
 
 #[cfg(test)]
