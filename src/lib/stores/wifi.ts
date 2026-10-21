@@ -17,6 +17,18 @@ export function wifiArcs(bars: number | null | undefined): number {
   return Math.max(1, Math.round((clamped * WIFI_ARCS) / MAX_BARS));
 }
 
+/** Qué conexión representa la ficha de Wi-Fi: por cable (Ethernet) o Wi-Fi. */
+export type LinkKind = "ethernet" | "wifi";
+
+/** Cómo se presenta la ficha de internet: con cable manda el cable (icono y nombre), aunque también haya antena Wi-Fi. */
+export function linkLook(radio: { available: boolean; ethernet?: boolean }): { kind: LinkKind; label: string; tooltip?: string } {
+  if (radio.ethernet) {
+    // Sin antena Wi-Fi la ficha ES la conexión por cable; con antena sigue llamándose Wi-Fi porque es lo que enciende o apaga.
+    return { kind: "ethernet", label: radio.available ? "Wi-Fi" : "Ethernet", tooltip: "Conectado por cable (Ethernet)" };
+  }
+  return { kind: "wifi", label: "Wi-Fi" };
+}
+
 /** Texto de la intensidad para el tooltip: «Señal: 4 de 5». */
 export function signalText(bars: number | null | undefined): string {
   if (bars === undefined) return "";

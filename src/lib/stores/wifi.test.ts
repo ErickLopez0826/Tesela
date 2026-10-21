@@ -26,3 +26,18 @@ describe("signalText", () => {
     expect(signalText(undefined)).toBe("");
   });
 });
+
+describe("linkLook", () => {
+  it("con cable manda el cable: sin antena la ficha se llama Ethernet; con antena sigue llamándose Wi-Fi", async () => {
+    const { linkLook } = await import("./wifi");
+    expect(linkLook({ available: false, ethernet: true })).toMatchObject({ kind: "ethernet", label: "Ethernet" });
+    expect(linkLook({ available: true, ethernet: true })).toMatchObject({ kind: "ethernet", label: "Wi-Fi" });
+    expect(linkLook({ available: true, ethernet: true }).tooltip).toContain("cable");
+  });
+
+  it("sin cable es la ficha de Wi-Fi de siempre", async () => {
+    const { linkLook } = await import("./wifi");
+    expect(linkLook({ available: true })).toEqual({ kind: "wifi", label: "Wi-Fi" });
+    expect(linkLook({ available: false, ethernet: false })).toEqual({ kind: "wifi", label: "Wi-Fi" });
+  });
+});

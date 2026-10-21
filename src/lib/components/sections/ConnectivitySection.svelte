@@ -4,7 +4,7 @@
   import type { ActionOutcome, AudioApi, AudioDevice, NetworkApi, RadioKindName, RadioState } from "../../api/system";
   import AudioDetails from "./AudioDetails.svelte";
   import ConnectivityDetails from "./ConnectivityDetails.svelte";
-  import { signalText, wifiArcs } from "../../stores/wifi";
+  import { linkLook, signalText, wifiArcs } from "../../stores/wifi";
 
   let {
     radios,
@@ -91,11 +91,23 @@
   <h3>Conectividad {#if !allowChanges}<span class="badge safe">modo seguro: simulado</span>{/if}</h3>
   <div class="tiles">
     {#each radios as r (r.kind)}
+      {@const look = r.kind === "wifi" ? linkLook(r) : null}
+      {@const cable = look?.kind === "ethernet"}
       <div class="cell">
-        <button class="tile" class:on={r.on} disabled={!r.available} aria-pressed={r.on} title={r.kind === "wifi" && r.on ? signalText(r.signal) || undefined : undefined} onclick={() => toggle(r)}>
-          <!-- El icono de Wi-Fi sigue a la intensidad de la conexión: más o menos arcos según la señal. -->
-          <span class="ico"><Icon name={icons[r.kind]} size={18} level={r.kind === "wifi" && r.on ? wifiArcs(r.signal) : undefined} /></span>
-          <span class="txt"><strong>{labels[r.kind]}</strong><small>{r.available ? (r.on ? "sí" : "no") : "no disponible"}</small></span>
+        <!-- Con cable, la ficha de internet no es «Wi-Fi apagado o sin conexión»: es la conexión por cable. -->
+        <button
+          class="tile"
+          class:on={r.on || (cable && !r.available)}
+          disabled={!r.available}
+          aria-pressed={r.on}
+          title={cable ? look?.tooltip : r.kind === "wifi" && r.on ? signalText(r.signal) || undefined : undefined}
+          onclick={() => toggle(r)}
+        >
+          <!-- El icono de Wi-Fi sigue a la intensidad de la conexión (más o menos arcos); con cable es un conector. -->
+          <span class="ico">
+            {#if cable}<Icon name="ethernet" size={18} />{:else}<Icon name={icons[r.kind]} size={18} level={r.kind === "wifi" && r.on ? wifiArcs(r.signal) : undefined} />{/if}
+          </span>
+          <span class="txt"><strong>{look?.label ?? labels[r.kind]}</strong><small>{cable && !r.available ? "conectado" : r.available ? (r.on ? "sí" : "no") : "no disponible"}</small></span>
         </button>
         {#if network && r.available}
           <button class="more" class:open={open === r.kind} aria-label={`Detalles de ${labels[r.kind]}`} aria-expanded={open === r.kind} onclick={() => (open = open === r.kind ? null : r.kind)}>

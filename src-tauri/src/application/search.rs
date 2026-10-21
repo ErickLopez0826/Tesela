@@ -7,7 +7,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
 use crate::domain::search::{
-    fold, host_of, is_http_url, norm, origin_of, parse_web_search, rank, Candidate, Redirect, RedirectKind, Ranked, SearchItem, SearchKind, UsageEntry,
+    fold, host_of, is_http_url, norm, opens_new_window, origin_of, parse_web_search, rank, Candidate, Redirect, RedirectKind, Ranked, SearchItem, SearchKind, UsageEntry,
     WEB_SEARCH_SCORE,
 };
 use crate::domain::packaged;
@@ -118,7 +118,9 @@ impl SearchService {
 
         for app in host.apps() {
             let key = format!("app:{}:{}", app.exe, fold(&app.name));
-            let window = app.running.then(|| open.iter().find(|o| exe_of_path(&o.exe) == app.exe)).flatten();
+            // Un navegador nunca se enfoca: puede estar abierto solo por una app web (WhatsApp Web…) y al elegirlo se espera su
+            // ventana de siempre. Se lanza otra ventana.
+            let window = (app.running && !opens_new_window(&app.exe)).then(|| open.iter().find(|o| exe_of_path(&o.exe) == app.exe)).flatten();
             // El `.exe` de una app empaquetada vive en `WindowsApps` y Windows no deja ejecutarlo directamente: para reabrirla o sacar
             // su logo se usa siempre su dirección de la Tienda.
             let keep_own_path = packaged::is_launch_path(&app.path);
@@ -314,6 +316,36 @@ mod tests {
         assert_eq!((spotify.kind, spotify.subtitle.as_str()), (SearchKind::Running, "En ejecución"));
         let steam = by(&items, "Steam");
         assert_eq!((steam.kind, steam.subtitle.as_str()), (SearchKind::App, "Aplicación"));
+    }
+
+    #[test]
+    fn un_navegador_abierto_solo_por_una_app_web_abre_una_ventana_nueva_y_no_enfoca_la_otra() {
+        // WhatsApp Web (una app de Chrome) tiene una ventana con el mismo ejecutable que «Google Chrome».
+        let mut h = FakeHost {
+            apps: vec![app("Google Chrome", "chrome", true), app("Microsoft Edge", "msedge", true), app("Firefox", "firefox", true)],
+            open: vec![window(21, "chrome"), window(22, "msedge"), window(23, "firefox")],
+            ..Default::default()
+        };
+        let svc = SearchService::new();
+        for (text, title) in [("google", "Google Chrome"), ("edge", "Microsoft Edge"), ("fire", "Firefox")] {
+            let items = query(&svc, &mut h, text, &[]);
+            let item = by(&items, title);
+            assert_eq!((item.kind, item.subtitle.as_str()), (SearchKind::App, "Aplicación"), "{title} no debe salir «En ejecución»");
+            svc.open(&mut h, &item.id, false).unwrap();
+        }
+        assert!(h.focused.is_empty(), "no debe enfocar ninguna ventana: {:?}", h.focused);
+        assert_eq!(h.launched.len(), 3);
+        assert!(h.launched.iter().all(|(_, admin)| !admin));
+    }
+
+    #[test]
+    fn con_ctrl_enter_un_navegador_abierto_tambien_abre_uno_nuevo_como_administrador() {
+        let mut h = FakeHost { apps: vec![app("Google Chrome", "chrome", true)], open: vec![window(21, "chrome")], ..Default::default() };
+        let svc = SearchService::new();
+        let items = query(&svc, &mut h, "chrome", &[]);
+        svc.open(&mut h, &items[0].id, true).unwrap();
+        assert!(h.focused.is_empty());
+        assert_eq!(h.launched, vec![(r"C:\Menu\Google Chrome.lnk".to_string(), true)]);
     }
 
     #[test]

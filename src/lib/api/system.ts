@@ -70,6 +70,8 @@ export interface RadioState {
   on: boolean;
   /** Solo el Wi-Fi: barras de señal (0 a 5) de la red conectada, o `null` si está encendido sin conexión. */
   signal?: number | null;
+  /** Solo el Wi-Fi: el equipo sale a internet por cable (Ethernet), haya o no antena Wi-Fi. */
+  ethernet?: boolean;
 }
 
 export interface WifiNetwork {

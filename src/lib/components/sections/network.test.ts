@@ -217,3 +217,34 @@ describe("icono de Wi-Fi según la señal", () => {
     expect(document.querySelectorAll(".tile")[1].querySelectorAll("path.arc").length).toBe(0);
   });
 });
+
+describe("internet por cable (Ethernet)", () => {
+  const tile = () => document.querySelector(".tile") as HTMLElement;
+  const hasCable = () => tile().querySelectorAll(".ico svg path").length === 5 && !tile().querySelector("path.arc");
+
+  it("un equipo de escritorio sin antena Wi-Fi, conectado por cable, muestra Ethernet con el icono de cable y activo", () => {
+    render(ConnectivitySection, { radios: [{ kind: "wifi", available: false, on: false, ethernet: true }], allowChanges: true, onSet: vi.fn() });
+    expect(tile().textContent).toContain("Ethernet");
+    expect(tile().textContent).toContain("conectado");
+    expect(tile().textContent).not.toContain("no disponible");
+    expect(tile().classList.contains("on")).toBe(true);
+    expect(hasCable()).toBe(true);
+    expect(tile().title).toContain("cable");
+    expect((tile() as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("con antena Wi-Fi pero saliendo por cable, el icono es el cable (no un Wi-Fi vacío) y la ficha sigue encendiendo el Wi-Fi", async () => {
+    const onSet = vi.fn().mockResolvedValue({ simulated: false, description: "ok" });
+    render(ConnectivitySection, { radios: [{ kind: "wifi", available: true, on: true, signal: null, ethernet: true }], allowChanges: true, onSet });
+    expect(tile().textContent).toContain("Wi-Fi");
+    expect(hasCable()).toBe(true);
+    await fireEvent.click(tile());
+    expect(onSet).toHaveBeenCalledWith("wifi", false);
+  });
+
+  it("sin cable no cambia nada: el icono de Wi-Fi con sus arcos", () => {
+    render(ConnectivitySection, { radios: [{ kind: "wifi", available: true, on: true, signal: 4, ethernet: false }], allowChanges: true, onSet: vi.fn() });
+    expect(tile().querySelectorAll("path.arc").length).toBe(3);
+    expect(tile().textContent).toContain("Wi-Fi");
+  });
+});

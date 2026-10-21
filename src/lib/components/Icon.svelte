@@ -19,7 +19,8 @@
     | "snowflake"
     | "folder"
     | "search"
-    | "globe";
+    | "globe"
+    | "ethernet";
   /** `level`: solo el Wi-Fi. Cuántos de sus 3 arcos se ven encendidos (0 a 3); los demás quedan tenues. */
   let { name, size = 16, level = 3 }: { name: IconName; size?: number; level?: number } = $props();
 </script>
@@ -64,6 +65,9 @@
     <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
   {:else if name === "search"}
     <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+  {:else if name === "ethernet"}
+    <!-- Conector RJ45 con su cable: la conexión por cable. -->
+    <path d="M6 3h12v9a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2z" /><path d="M9 3v4" /><path d="M12 3v4" /><path d="M15 3v4" /><path d="M10 14v3a2 2 0 0 0 2 2 2 2 0 0 1 2 2v1" />
   {:else if name === "globe"}
     <circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
   {/if}

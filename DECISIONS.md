@@ -360,3 +360,13 @@ Sustituye la idea descartada del `statusLine` (que solo corre en la terminal de 
 - Tras la 2.0.0 (buscador, D-106) se hicieron cambios sin subir el número: batería y Configuración de Windows en el buscador, todo lo de Claude (estado de Claude Code, uso de la suscripción, tarjeta, agentes) y la ruta de Wallpaper Engine. Según D-87 lo de Claude es un cambio **significativo** (segundo número → **2.1.0**) y los ajustes posteriores (tarjeta con la personalización del panel, ruta de Wallpaper Engine, panel que se cierra al alejar el cursor, borde animado que sigue a la ventana, opacidad del porcentaje) son **pequeños** (tercer número → **2.1.1**). Las entradas D-106…D-113 dicen «2.0.0» porque se escribieron antes de este reajuste.
 - A partir de aquí cada cambio entregado sube el número según D-87, sin esperar a que se pida; el primero solo lo cambia Erick.
 - Erick fijó la versión en **2.2.0** (en vez de la 2.1.1 que se había propuesto) para recoger todo lo anterior.
+## D-115 · Navegadores siempre abren ventana nueva y la ficha de internet reconoce el cable (2.0.1, ya dentro de la 2.2.0)
+
+- Buscador: «En ejecución» enfocaba la primera ventana con el mismo ejecutable, así que con WhatsApp Web (una app de Chrome) abierta, elegir «Google Chrome» llevaba a WhatsApp Web. Los navegadores (`opens_new_window`: chrome, msedge, firefox, brave, opera, vivaldi, chromium, iexplore, waterfox, librewolf…) ya nunca se enfocan: se lanza una ventana nueva, también con ctrl+Enter, y salen como «Aplicación», no «En ejecución».
+- Panel → Conectividad: la ficha de internet solo conocía el Wi-Fi (una antena encendida sin red mostraba solo el punto, un equipo sin antena «no disponible»). Ahora `RadioState.ethernet` dice si la conexión a internet que usa Windows es por cable (perfil de internet con interfaz IANA 6/62/69/117); con cable la ficha muestra un conector Ethernet y, sin antena, se llama «Ethernet · conectado». Comprobado en este equipo: Wi-Fi encendido sin señal + cable → `ethernet: true`.
+
+## D-116 · El Explorador de archivos también abre ventana nueva (2.0.2, ya dentro de la 2.2.0)
+
+- Buscador: «Explorador de archivos» comparte `explorer.exe` con el escritorio y cualquier carpeta abierta (o escondida en otro workspace), así que el buscador la marcaba «En ejecución» y solo enfocaba otra ventana: en el PC de escritorio no se veía abrir nada. `explorer` se añade a `opens_new_window` (junto a los navegadores): siempre se lanza una ventana nueva.
+
+(Las entradas D-115 y D-116 llegaron de otra copia del proyecto que las numeró D-106 y D-107; se renumeraron al unir los cambios, y sus versiones 2.0.1 y 2.0.2 quedan absorbidas por la 2.2.0.)

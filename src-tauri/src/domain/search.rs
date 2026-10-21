@@ -169,6 +169,24 @@ pub fn host_of(url: &str) -> String {
 // Coincidencia (§18.7)
 // ---------------------------------------------------------------------------------------------------------------------
 
+/// Navegadores (nombre del ejecutable sin `.exe`, en minúsculas). Un navegador abierto casi nunca está «como navegador»: puede
+/// tener solo una app web (WhatsApp Web, YouTube Music…) que comparte su ejecutable. Por eso, al elegir un navegador en el
+/// buscador, **siempre se abre una ventana nueva** en lugar de enfocar la que ya hubiera.
+///
+/// Se añade `explorer`: el Explorador de archivos comparte ejecutable con el escritorio y con cualquier carpeta abierta (o
+/// escondida en otro workspace), así que «enfocar» una de ellas no abría nada visible. Elegirlo abre siempre una ventana nueva.
+const BROWSERS: &[&str] = &[
+    "chrome", "msedge", "firefox", "brave", "opera", "opera_gx", "operagx", "vivaldi", "chromium", "iexplore", "waterfox", "librewolf", "floorp", "zen",
+    "thorium", "arc", "yandex", "tor", "palemoon", "maxthon", "epiphany", "explorer",
+];
+
+/// ¿Debe abrir una ventana nueva (navegadores y Explorador de archivos) aunque ya haya otra con el mismo ejecutable?
+pub fn opens_new_window(exe: &str) -> bool {
+    let stem = exe.trim().to_lowercase();
+    let stem = stem.trim_end_matches(".exe");
+    BROWSERS.contains(&stem)
+}
+
 /// Minúsculas y sin tildes, para que «camara» encuentre «Cámara».
 pub fn fold(s: &str) -> String {
     s.chars()
@@ -357,6 +375,16 @@ pub fn rank(query: &str, candidates: Vec<Candidate>, usage: &HashMap<String, Usa
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn los_navegadores_siempre_abren_ventana_nueva_y_el_resto_no() {
+        for exe in ["chrome", "Chrome.exe", "msedge", "firefox", "brave", "opera", "vivaldi", "chromium", "iexplore", "waterfox", "librewolf", "explorer", "Explorer.exe"] {
+            assert!(super::opens_new_window(exe), "{exe}");
+        }
+        for exe in ["spotify", "code", "notepad", "chrome_proxy", "discord", "", "chromedriver"] {
+            assert!(!super::opens_new_window(exe), "{exe}");
+        }
+    }
+
     use super::*;
 
     fn redirect(word: &str, url: &str, kind: RedirectKind) -> Redirect {
